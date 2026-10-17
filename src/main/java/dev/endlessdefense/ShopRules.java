@@ -4,16 +4,24 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.alchemy.PotionContents;
 import net.minecraft.world.item.alchemy.Potions;
+import java.util.Arrays;
+import java.util.Comparator;
 
 /** Stable product IDs: 0–5 preserve saves from 0.3. */
 public final class ShopRules {
     private ShopRules() {}
+    public enum Category {
+        FOOD("음식"), UTILITY("유용한 아이템"), ARMOR("방어구"), BUILDING("건축");
+        private final String title;
+        Category(String title) { this.title = title; }
+        public String title() { return title; }
+    }
     public record Product(String name, String description, long price, int unlockWave, int perWave, ItemStack[] items) {}
     public static final long[] UPGRADE_COSTS = {30, 100, 300, 850, 2000};
     public static final int[] UPGRADE_IDS = {0, 1, 2, 6, 7, 8, 9};
     public static final String[] NAMES = {
             "빠른 채굴", "추가 체력", "이동 속도", "철 장비 꾸러미", "다이아 장비 꾸러미", "종결 네더라이트 장비",
-            "방어 강화", "공격 강화", "회복 능력", "정찰 강화", "빵 ×8", "구운 소고기 ×8", "황금 사과",
+            "방어 강화", "공격력 강화", "회복 능력", "정찰 강화", "빵 ×8", "구운 소고기 ×8", "황금 사과",
             "즉시 회복 물약 ×2", "횃불 ×32", "랜턴 ×8", "참나무 원목 ×32", "조약돌 ×64", "철 주괴 ×8",
             "화살 ×32", "모루", "석재 벽돌 ×64", "흑요석 ×16", "거미줄 ×8", "방패", "토템", "마법 황금 사과",
             "돌 검", "가죽 방어구 꾸러미"
@@ -24,7 +32,7 @@ public final class ShopRules {
             gear("철 장비 꾸러미", "검·곡괭이·방어구", 2000, 1, 0, Items.IRON_SWORD, Items.IRON_PICKAXE, Items.IRON_HELMET, Items.IRON_CHESTPLATE, Items.IRON_LEGGINGS, Items.IRON_BOOTS),
             gear("다이아 장비 꾸러미", "검·곡괭이·방어구", 18000, 12, 0, Items.DIAMOND_SWORD, Items.DIAMOND_PICKAXE, Items.DIAMOND_HELMET, Items.DIAMOND_CHESTPLATE, Items.DIAMOND_LEGGINGS, Items.DIAMOND_BOOTS),
             gear("종결 네더라이트 장비", "검·곡괭이·방어구", 10000000, 40, 1, Items.NETHERITE_SWORD, Items.NETHERITE_PICKAXE, Items.NETHERITE_HELMET, Items.NETHERITE_CHESTPLATE, Items.NETHERITE_LEGGINGS, Items.NETHERITE_BOOTS),
-            upgrade("방어 강화", "방어력 +1/단계"), upgrade("공격 강화", "근접 공격력 +0.5/단계"),
+            upgrade("방어 강화", "방어력 +1/단계"), upgrade("공격력 강화", "근접 공격력 +1/단계"),
             upgrade("회복 능력", "재생 I~II (3·5단계 해금)"), upgrade("정찰 강화", "위협 정보·보스 표시 해금"),
             supply("빵 ×8", "초반 식량", 30, 1, 0, new ItemStack(Items.BREAD, 8)),
             supply("구운 소고기 ×8", "고효율 식량", 60, 1, 0, new ItemStack(Items.COOKED_BEEF, 8)),
@@ -62,6 +70,22 @@ public final class ShopRules {
         return supply(name, description, price, wave, cap, stacks);
     }
     public static Product product(int id) { return id >= 0 && id < PRODUCTS.length ? PRODUCTS[id] : null; }
+    public static Category category(int id) {
+        if (upgradeSlot(id) >= 0 || product(id) == null) return null;
+        return switch (id) {
+            case 10, 11, 12, 13, 26 -> Category.FOOD;
+            case 14, 15, 18, 19, 20, 25 -> Category.UTILITY;
+            case 3, 4, 5, 24, 27, 28 -> Category.ARMOR;
+            case 16, 17, 21, 22, 23 -> Category.BUILDING;
+            default -> null;
+        };
+    }
+    public static int[] catalog(Category category) {
+        return Arrays.stream(java.util.stream.IntStream.range(0, PRODUCTS.length).toArray())
+                .filter(id -> category(id) == category).boxed()
+                .sorted(Comparator.<Integer>comparingLong(id -> PRODUCTS[id].price()).thenComparingInt(id -> id))
+                .mapToInt(Integer::intValue).toArray();
+    }
     public static int upgradeSlot(int id) {
         for (int i = 0; i < UPGRADE_IDS.length; i++) if (UPGRADE_IDS[i] == id) return i;
         return -1;
@@ -75,7 +99,7 @@ public final class ShopRules {
             case 1 -> "최대 체력 +" + (next * 4);
             case 2 -> "신속 " + next + "단계";
             case 6 -> "방어력 +" + next;
-            case 7 -> "근접 공격력 +" + (next * 0.5);
+            case 7 -> "근접 공격력 +" + next;
             case 8 -> "10초마다 체력 +" + (next * 0.5) + (next >= 5 ? " · 재생 II" : next >= 3 ? " · 재생 I" : "");
             case 9 -> next == 1 ? "다음 보스 웨이브 표시" : next == 2 ? "발광 색상 범례 표시" : "적 체력 배율 표시";
             default -> "";

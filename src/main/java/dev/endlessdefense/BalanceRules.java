@@ -36,11 +36,6 @@ public final class BalanceRules {
         return initialTickets(data, players);
     }
 
-    public static int chapterGrant(WaveData data, int wave, int players) {
-        if (wave <= 1 || (wave - 1) % data.respawnGrantInterval != 0) return 0;
-        return Math.max(1, Math.min(ticketCap(data, wave, players), (players + 1) / 2));
-    }
-
     public static double healthMultiplier(int wave) {
         return Math.min(3.4, 1.0 + Math.max(0, wave - 1) * 0.085);
     }

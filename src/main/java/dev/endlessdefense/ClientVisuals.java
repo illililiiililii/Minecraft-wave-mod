@@ -11,7 +11,10 @@ import net.minecraft.client.renderer.entity.ZombieRenderer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.monster.Zombie;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.AddGuiOverlayLayersEvent;
 import net.minecraftforge.client.event.EntityRenderersEvent;
@@ -65,7 +68,8 @@ public final class ClientVisuals {
                             : "시작 준비 · " + status.ready() + "/" + status.total() + "명";
                     graphics.drawString(mc.font, state, x, y + 11, 0xFFFFFF, true);
                     graphics.drawString(mc.font, "노드 " + status.coins() + "  ·  G 준비  H 상태  K 상점", x, y + 22, 0xAAAAAA, true);
-                    graphics.drawString(mc.font, "팀 부활 " + status.respawns() + "회" + (status.night() ? "  ·  야간 웨이브" : "")
+                    graphics.drawString(mc.font, (status.phase() == 1 ? "다음 웨이브 팀 부활 " : "팀 부활 ")
+                                    + status.respawns() + "회" + (status.night() ? "  ·  야간 웨이브" : "")
                                     + (status.surrenderVotes() > 0 ? "  ·  종료 " + status.surrenderVotes() + "/" + status.total() : ""),
                             x, y + 33, 0xFFCCAA, true);
                     graphics.drawString(mc.font, status.phase() == 0 ? "H 메뉴에서 웨이브 포기 투표 가능" : "⚠ H 메뉴: 웨이브 포기 투표",
@@ -85,7 +89,8 @@ public final class ClientVisuals {
         @SubscribeEvent public static void nameTag(RenderNameTagEvent event) {
             if (!(event.getEntity() instanceof LivingEntity mob) ||
                     !(mob.getTags().contains("endlessdefense_wave") || mob.getType() == ModMobs.ASH_RUNNER.get()
-                            || mob.getType() == ModMobs.IRON_BULWARK.get())) return;
+                            || mob.getType() == ModMobs.IRON_BULWARK.get()
+                            || mob.getType() == EntityType.ZOMBIE || mob.getType() == EntityType.SKELETON)) return;
             float max = Math.max(1, mob.getMaxHealth());
             int filled = Math.max(0, Math.min(10, Math.round(mob.getHealth() / max * 10)));
             int color = filled > 6 ? 0x55FF55 : filled > 3 ? 0xFFFF55 : 0xFF5555;
@@ -145,7 +150,8 @@ public final class ClientVisuals {
                     : status.phase() == 2 ? "남은 적: " + status.remaining()
                     : status.phase() == 1 ? "다음 웨이브 대기 중" : "준비 인원: " + status.ready() + "/" + status.total(), x, y + 14, 0xFFFFFF, true);
             graphics.drawString(font, "보유 노드: " + status.coins(), x, y + 25, 0xFFFFAA, true);
-            graphics.drawString(font, "팀 공유 부활: " + status.respawns() + "회" + (status.night() ? " · 야간" : ""),
+            graphics.drawString(font, (status.phase() == 1 ? "다음 웨이브 팀 부활: " : "팀 공유 부활: ")
+                            + status.respawns() + "회" + (status.night() ? " · 야간" : ""),
                     x, y + 36, 0xFFCCAA, true);
             graphics.drawString(font, "참가자 준비 상태", x, y + 49, 0xFFD480, true);
             String[] players = status.roster().isBlank() ? new String[]{"접속 중인 플레이어 없음"}
@@ -160,54 +166,156 @@ public final class ClientVisuals {
     }
 
     private static final class ShopScreen extends Screen {
-        private static final int PAGE_SIZE = 6;
-        private final Button[] buyButtons = new Button[PAGE_SIZE];
-        private int page;
+        private static final ShopRules.Category[] TABS = ShopRules.Category.values();
+        private static final int[][] CATALOGS = java.util.Arrays.stream(TABS).map(ShopRules::catalog).toArray(int[][]::new);
+        private final Button[] upgradeButtons = new Button[4];
+        private final Button[] itemButtons = new Button[4];
+        private final Button[] tabButtons = new Button[TABS.length];
+        private Button previousUpgrade, nextUpgrade, previousItem, nextItem;
+        private int tab, itemPage, upgradeOffset, visibleCards, cardWidth, left, top;
         private ShopScreen() { super(Component.literal("Endless Defense 상점")); }
 
         @Override protected void init() {
-            int y0 = height / 2 - 66;
-            for (int i = 0; i < buyButtons.length; i++) {
-                final int row = i;
-                buyButtons[i] = Button.builder(Component.literal("구매"), button -> EndlessDefense.requestPurchase(page * PAGE_SIZE + row))
-                        .bounds(width / 2 + 118, y0 + i * 23, 48, 20).build();
-                addRenderableWidget(buyButtons[i]);
+            top = Math.max(8, (height - 218) / 2);
+            visibleCards = Math.min(4, Math.max(2, (width - 56) / 88));
+            cardWidth = Math.min(108, (width - 56) / visibleCards);
+            left = (width - visibleCards * cardWidth) / 2;
+            for (int i = 0; i < upgradeButtons.length; i++) {
+                final int slot = i;
+                int x = left + i * cardWidth + 5;
+                upgradeButtons[i] = Button.builder(Component.literal("구매"), button -> {
+                    int id = upgradeId(slot);
+                    if (id >= 0) EndlessDefense.requestPurchase(id);
+                }).bounds(x, top + 84, cardWidth - 10, 19).build();
+                addRenderableWidget(upgradeButtons[i]);
+                itemButtons[i] = Button.builder(Component.literal("구매"), button -> {
+                    int id = itemId(slot);
+                    if (id >= 0) EndlessDefense.requestPurchase(id);
+                }).bounds(x, top + 198, cardWidth - 10, 19).build();
+                addRenderableWidget(itemButtons[i]);
             }
-            addRenderableWidget(Button.builder(Component.literal("◀ 이전"), button -> page = Math.max(0, page - 1))
-                    .bounds(width / 2 - 118, height / 2 + 78, 75, 20).build());
-            addRenderableWidget(Button.builder(Component.literal("다음 ▶"), button -> page = Math.min((ShopRules.NAMES.length - 1) / PAGE_SIZE, page + 1))
-                    .bounds(width / 2 + 43, height / 2 + 78, 75, 20).build());
+            previousUpgrade = addRenderableWidget(Button.builder(Component.literal("‹"), button ->
+                    upgradeOffset = Math.max(0, upgradeOffset - visibleCards)).bounds(left - 22, top + 55, 20, 20).build());
+            nextUpgrade = addRenderableWidget(Button.builder(Component.literal("›"), button ->
+                    upgradeOffset = Math.min(ShopRules.UPGRADE_IDS.length - 1, upgradeOffset + visibleCards))
+                    .bounds(left + visibleCards * cardWidth + 2, top + 55, 20, 20).build());
+            for (int i = 0; i < TABS.length; i++) {
+                final int chosen = i;
+                int w = (width - 16) / TABS.length;
+                tabButtons[i] = addRenderableWidget(Button.builder(Component.literal(TABS[i].title()), button -> {
+                    tab = chosen;
+                    itemPage = 0;
+                }).bounds(8 + i * w, top + 111, w - 2, 20).build());
+            }
+            previousItem = addRenderableWidget(Button.builder(Component.literal("‹"), button ->
+                    itemPage = Math.max(0, itemPage - 1)).bounds(left - 22, top + 169, 20, 20).build());
+            nextItem = addRenderableWidget(Button.builder(Component.literal("›"), button ->
+                    itemPage = Math.min((CATALOGS[tab].length - 1) / visibleCards, itemPage + 1))
+                    .bounds(left + visibleCards * cardWidth + 2, top + 169, 20, 20).build());
             addRenderableWidget(Button.builder(Component.literal("돌아가기"), button -> onClose())
-                    .bounds(width / 2 - 70, height / 2 + 102, 140, 20).build());
+                    .bounds(width - 65, top, 58, 18).build());
         }
 
         @Override public void onClose() { Minecraft.getInstance().setScreen(new StatusScreen()); }
 
+        private int upgradeId(int slot) {
+            int index = upgradeOffset + slot;
+            return slot < visibleCards && index < ShopRules.UPGRADE_IDS.length ? ShopRules.UPGRADE_IDS[index] : -1;
+        }
+
+        private int itemId(int slot) {
+            int index = itemPage * visibleCards + slot;
+            return slot < visibleCards && index < CATALOGS[tab].length ? CATALOGS[tab][index] : -1;
+        }
+
+        private static ItemStack icon(int id) {
+            return switch (id) {
+                case 0 -> new ItemStack(Items.DIAMOND_PICKAXE);
+                case 1 -> new ItemStack(Items.GOLDEN_APPLE);
+                case 2 -> new ItemStack(Items.SUGAR);
+                case 6 -> new ItemStack(Items.IRON_CHESTPLATE);
+                case 7 -> new ItemStack(Items.IRON_SWORD);
+                case 8 -> new ItemStack(Items.GLISTERING_MELON_SLICE);
+                case 9 -> new ItemStack(Items.SPYGLASS);
+                default -> ShopRules.product(id).items()[0];
+            };
+        }
+
         @Override public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-            super.render(graphics, mouseX, mouseY, partialTick);
-            graphics.drawCenteredString(font, "상점 · 보유 노드 " + status.coins() + " · " + (page + 1)
-                    + "/" + ((ShopRules.NAMES.length + PAGE_SIZE - 1) / PAGE_SIZE), width / 2, height / 2 - 85, 0xFFD480);
-            int y0 = height / 2 - 66;
-            for (int i = 0; i < buyButtons.length; i++) {
-                int id = page * PAGE_SIZE + i;
-                if (id >= ShopRules.NAMES.length) { buyButtons[i].visible = false; continue; }
-                buyButtons[i].visible = true;
-                ShopRules.Product item = ShopRules.product(id);
-                int slot = ShopRules.upgradeSlot(id);
-                int level = slot >= 0 ? status.upgrades()[slot] : 0;
-                long cost = ShopRules.cost(id, level);
-                int remaining = item.perWave() > 0 ? item.perWave() - status.stock()[id] : -1;
-                boolean unlocked = status.wave() >= item.unlockWave();
-                buyButtons[i].active = unlocked && cost >= 0 && status.coins() >= cost && remaining != 0;
-                String headline = item.name() + (slot >= 0 ? " " + level + "/" + ShopRules.maxLevel(id) : "")
-                        + " · " + (cost < 0 ? "최대" : cost + " 노드");
-                graphics.drawString(font, headline, width / 2 - 166, y0 + i * 23 + 1, 0xFFFFFF, true);
-                String detail = slot >= 0 ? "다음 단계: " + ShopRules.nextEffect(id, level) : item.description();
-                if (!unlocked) detail += " · " + item.unlockWave() + "웨이브 해금";
-                else if (remaining >= 0) detail += " · 남은 재고 " + remaining;
-                graphics.drawString(font, detail, width / 2 - 166, y0 + i * 23 + 11, 0xAAAAAA, true);
+            upgradeOffset = Math.min(upgradeOffset, ((ShopRules.UPGRADE_IDS.length - 1) / visibleCards) * visibleCards);
+            itemPage = Math.min(itemPage, (CATALOGS[tab].length - 1) / visibleCards);
+            previousUpgrade.active = upgradeOffset > 0;
+            nextUpgrade.active = upgradeOffset + visibleCards < ShopRules.UPGRADE_IDS.length;
+            previousItem.active = itemPage > 0;
+            nextItem.active = (itemPage + 1) * visibleCards < CATALOGS[tab].length;
+            for (int i = 0; i < TABS.length; i++)
+                tabButtons[i].setMessage(Component.literal((tab == i ? "● " : "") + TABS[i].title()));
+            for (int i = 0; i < upgradeButtons.length; i++) {
+                int upgrade = upgradeId(i), item = itemId(i);
+                upgradeButtons[i].visible = upgrade >= 0;
+                itemButtons[i].visible = item >= 0;
+                if (upgrade >= 0) updatePurchaseButton(upgradeButtons[i], upgrade);
+                if (item >= 0) updatePurchaseButton(itemButtons[i], item);
             }
-            graphics.drawCenteredString(font, "지속 효과는 사망·재접속 후에도 유지", width / 2, height / 2 + 67, 0xAAAAAA);
+            super.render(graphics, mouseX, mouseY, partialTick);
+            graphics.drawString(font, "상점 · 보유 노드 " + status.coins(), left, top + 4, 0xFFD480, true);
+            graphics.drawCenteredString(font, "지속 업그레이드 " + (upgradeOffset / visibleCards + 1) + "/"
+                    + ((ShopRules.UPGRADE_IDS.length - 1) / visibleCards + 1), width / 2, top + 20, 0x99DDFF);
+            for (int i = 0; i < visibleCards; i++) {
+                int id = upgradeId(i);
+                if (id >= 0) drawCard(graphics, id, left + i * cardWidth, top + 30, true);
+            }
+            graphics.fill(8 + tab * ((width - 16) / TABS.length), top + 132,
+                    8 + (tab + 1) * ((width - 16) / TABS.length) - 2, top + 134, 0xFFFFD480);
+            graphics.drawCenteredString(font, "가격 낮은 순 · " + (itemPage + 1) + "/"
+                    + ((CATALOGS[tab].length - 1) / visibleCards + 1), width / 2, top + 137, 0xAAAAAA);
+            for (int i = 0; i < visibleCards; i++) {
+                int id = itemId(i);
+                if (id >= 0) drawCard(graphics, id, left + i * cardWidth, top + 147, false);
+            }
+            for (int i = 0; i < visibleCards; i++) {
+                int x = left + i * cardWidth;
+                int id = mouseX >= x && mouseX < x + cardWidth ?
+                        mouseY >= top + 30 && mouseY < top + 104 ? upgradeId(i) :
+                        mouseY >= top + 147 && mouseY < top + 218 ? itemId(i) : -1 : -1;
+                if (id >= 0) {
+                    int slot = ShopRules.upgradeSlot(id);
+                    String detail = slot >= 0 ? ShopRules.nextEffect(id, status.upgrades()[slot])
+                            : ShopRules.product(id).description();
+                    graphics.renderTooltip(font, Component.literal(ShopRules.NAMES[id] + " · " + detail), mouseX, mouseY);
+                    break;
+                }
+            }
+        }
+
+        private void updatePurchaseButton(Button button, int id) {
+            ShopRules.Product product = ShopRules.product(id);
+            int slot = ShopRules.upgradeSlot(id);
+            long price = ShopRules.cost(id, slot >= 0 ? status.upgrades()[slot] : 0);
+            int stock = product.perWave() > 0 ? product.perWave() - status.stock()[id] : 1;
+            boolean unlocked = status.wave() >= product.unlockWave();
+            button.active = unlocked && price >= 0 && status.coins() >= price && stock > 0;
+            button.setMessage(Component.literal(price < 0 ? "최대" : !unlocked ? "잠김" : stock == 0 ? "품절" : "구매"));
+        }
+
+        private void drawCard(GuiGraphics graphics, int id, int x, int y, boolean upgrade) {
+            ShopRules.Product product = ShopRules.product(id);
+            int slot = ShopRules.upgradeSlot(id);
+            int level = slot >= 0 ? status.upgrades()[slot] : 0;
+            long price = ShopRules.cost(id, level);
+            int textColor = status.wave() < product.unlockWave() ? 0x888888 : 0xFFFFFF;
+            graphics.fill(x + 2, y, x + cardWidth - 2, y + (upgrade ? 52 : 49), 0xBB15232E);
+            graphics.drawCenteredString(font, font.plainSubstrByWidth(product.name(), cardWidth - 8),
+                    x + cardWidth / 2, y + 3, textColor);
+            graphics.renderItem(icon(id), x + cardWidth / 2 - 8, y + (upgrade ? 15 : 13));
+            if (upgrade)
+                graphics.drawCenteredString(font, "레벨 " + level + "/" + ShopRules.maxLevel(id),
+                        x + cardWidth / 2, y + 33, 0x99DDFF);
+            else if (product.perWave() > 0)
+                graphics.drawCenteredString(font, "재고 " + Math.max(0, product.perWave() - status.stock()[id]),
+                        x + cardWidth / 2, y + 30, 0xAAAAAA);
+            graphics.drawCenteredString(font, price < 0 ? "최대 레벨" : price + " 노드",
+                    x + cardWidth / 2, y + (upgrade ? 44 : 41), 0xFFD480);
         }
     }
 

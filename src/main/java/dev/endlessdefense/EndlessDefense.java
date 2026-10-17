@@ -237,6 +237,9 @@ public final class EndlessDefense {
             names.append(game.ready.contains(player.getUUID()) ? "[✓] " : "[ ] ").append(player.getName().getString());
         }
         String roster = names.length() > 1800 ? names.substring(0, 1800) : names.toString();
+        int shownRespawns = game.phase == Phase.WAITING && !game.retrying
+                ? BalanceRules.ticketCap(data, data.wave + 1, Math.max(1, participants(server, data).size()))
+                : data.respawns;
         for (ServerPlayer player : players) {
             WaveData.Account account = data.account(player.getUUID());
             CHANNEL.send(new StatusPacket(data.wave, data.highestWave, game.phase.ordinal(),
@@ -245,7 +248,7 @@ public final class EndlessDefense {
                     player.hasPermissions(2), data.baseMobs, data.healthPercent, data.damagePercent,
                     data.awareness, data.armorBonus, data.gearChance, account.coins, account.levels.clone(),
                     account.stockWave == data.wave ? account.stock.clone() : new int[ShopRules.NAMES.length],
-                    data.respawns, game.night, game.surrenderVotes.size(), game.surrenderVotes.contains(player.getUUID())),
+                    shownRespawns, game.night, game.surrenderVotes.size(), game.surrenderVotes.contains(player.getUUID())),
                     PacketDistributor.PLAYER.with(player));
         }
     }
@@ -255,7 +258,6 @@ public final class EndlessDefense {
         WaveData data = WaveData.get(server);
         data.started = true;
         data.respawns = BalanceRules.initialTickets(data, server.getPlayerList().getPlayerCount());
-        data.lastGrantWave = 1;
         data.eliminated.clear();
         data.pendingRespawn.clear();
         data.teamMembers.clear();
@@ -369,14 +371,8 @@ public final class EndlessDefense {
         game.phase = Phase.ACTIVE;
         data.wave++;
         data.waveInProgress = true;
-        if (data.lastGrantWave == 0 && data.wave > 1) { // migration from 0.3: give one initial pool.
-            data.respawns = BalanceRules.initialTickets(data, players.size());
-            data.lastGrantWave = data.wave;
-        } else if (data.wave > 1 && data.lastGrantWave < data.wave) {
-            int grant = BalanceRules.chapterGrant(data, data.wave, players.size());
-            data.respawns = Math.min(BalanceRules.ticketCap(data, data.wave, players.size()), data.respawns + grant);
-            data.lastGrantWave = data.wave;
-        }
+        if (!game.retrying) data.respawns = BalanceRules.ticketCap(data, data.wave, players.size());
+        game.retrying = false;
         data.highestWave = Math.max(data.highestWave, data.wave);
         data.setDirty();
         boolean bossWave = data.wave % 5 == 0;
@@ -440,6 +436,7 @@ public final class EndlessDefense {
         }
         game.mobs.clear(); game.bossMobs.clear(); game.kills.clear(); game.loot.clear();
         game.bossKilled = false;
+        game.retrying = true;
         data.wave = Math.max(0, data.wave - 1);
         data.waveInProgress = false;
         data.setDirty();
@@ -555,11 +552,24 @@ public final class EndlessDefense {
             if (player != null) for (ItemStack stack : entry.getValue())
                 if (!player.getInventory().add(stack)) player.drop(stack, false);
         }
+        // A cleared wave begins a fresh team life pool. Spectators return for the next wave.
+        data.restoreSurvival.addAll(data.eliminated);
+        for (UUID id : data.eliminated) {
+            ServerPlayer player = server.getPlayerList().getPlayer(id);
+            if (player != null) {
+                if (player.gameMode.getGameModeForPlayer() == GameType.SPECTATOR) player.setGameMode(GameType.SURVIVAL);
+                data.restoreSurvival.remove(id);
+            }
+        }
+        data.eliminated.clear();
+        for (ServerPlayer player : server.getPlayerList().getPlayers())
+            if (player.isAlive() && player.gameMode.getGameModeForPlayer() != GameType.SPECTATOR)
+                player.setHealth(player.getMaxHealth());
         data.waveInProgress = false;
         data.setDirty();
         announce(server, wave + "웨이브 클리어! 기본 +" + reward + " 노드"
-                + (game.bossKilled ? ", 보스 +" + data.bossReward : "") + " · 전리품 지급. 다음 웨이브는 자동 시작됩니다.");
-        title(server, wave + "웨이브 클리어!", "기본 +" + reward + " 노드", 10, 50, 10);
+                + (game.bossKilled ? ", 보스 +" + data.bossReward : "") + " · 체력 회복 · 전리품 지급. 다음 웨이브는 자동 시작됩니다.");
+        title(server, wave + "웨이브 클리어!", "체력 회복 · 기본 +" + reward + " 노드", 10, 50, 10);
         stopBattleMusic(server);
         cue(server, SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, 0.9f, 1.0f);
         scheduleWave(server, game);
@@ -591,7 +601,7 @@ public final class EndlessDefense {
         int regen = account.levels[5] >= 5 ? 2 : account.levels[5] >= 3 ? 1 : 0;
         persistentEffect(player, MobEffects.REGENERATION, regen);
         permanentAttribute(player, Attributes.ARMOR, "shop_armor", account.levels[3]);
-        permanentAttribute(player, Attributes.ATTACK_DAMAGE, "shop_attack", account.levels[4] * 0.5);
+        permanentAttribute(player, Attributes.ATTACK_DAMAGE, "shop_attack", account.levels[4]);
         if (account.levels[5] > 0 && player.isAlive()
                 && player.getHealth() < player.getMaxHealth())
             player.heal(account.levels[5] * 0.5f);
@@ -705,11 +715,12 @@ public final class EndlessDefense {
             Session game = session(level.getServer());
             if (!game.spawning && !game.mobs.contains(mob.getUUID())) { mob.discard(); return; }
         }
-        if (mob.getTags().contains("endlessdefense_wave") || mob.getType() == ModMobs.ASH_RUNNER.get()
-                || mob.getType() == ModMobs.IRON_BULWARK.get()) {
+        boolean waveOrCustom = mob.getTags().contains("endlessdefense_wave")
+                || mob.getType() == ModMobs.ASH_RUNNER.get() || mob.getType() == ModMobs.IRON_BULWARK.get();
+        if (waveOrCustom || mob.getType() == EntityType.ZOMBIE || mob.getType() == EntityType.SKELETON) {
             if (mob.getCustomName() == null) mob.setCustomName(mob.getType().getDescription());
             mob.setCustomNameVisible(true);
-            assignGlow(mob);
+            if (waveOrCustom) assignGlow(mob);
         }
     }
 
@@ -837,7 +848,7 @@ public final class EndlessDefense {
                                     + " mid=" + d.midRewardStep + " late=" + d.lateRewardStep + " killEvery=" + d.killRewardEvery
                                     + " killBounty=" + d.killBounty + " boss=" + d.bossReward
                                     + " night=" + d.nightPercent + " nightCap=" + d.nightCap + " respawnCap=" + d.respawnEarlyCap
-                                    + " lateWave=" + d.respawnLateWave + " grantInterval=" + d.respawnGrantInterval
+                                    + " lateWave=" + d.respawnLateWave
                                     + " restMinStep=" + d.restMinStep + " restMaxStep=" + d.restMaxStep
                                     + " restMaxCap=" + d.restMaxCap + " enchantDrop=" + d.enchantDropPercent), false);
                             return 1;
@@ -848,7 +859,6 @@ public final class EndlessDefense {
                         .then(setting("boss", 0, 2000))
                         .then(setting("night", 0, 25)).then(setting("nightCap", 0, 32))
                         .then(setting("respawnCap", 1, 20)).then(setting("lateWave", 10, 200))
-                        .then(setting("grantInterval", 2, 20))
                         .then(setting("restMinStep", 0, 10)).then(setting("restMaxStep", 0, 15))
                         .then(setting("restMaxCap", 60, 180)).then(setting("enchantDrop", 0, 50)));
         event.getDispatcher().register(root);
@@ -886,7 +896,6 @@ public final class EndlessDefense {
             case "nightCap" -> value >= 0 && value <= 32;
             case "respawnCap" -> value >= 1 && value <= 20;
             case "lateWave" -> value >= 10 && value <= 200;
-            case "grantInterval" -> value >= 2 && value <= 20;
             case "restMinStep" -> value >= 0 && value <= 10;
             case "restMaxStep" -> value >= 0 && value <= 15;
             case "restMaxCap" -> value >= 60 && value <= 180;
@@ -912,7 +921,6 @@ public final class EndlessDefense {
             case "nightCap" -> data.nightCap = value;
             case "respawnCap" -> data.respawnEarlyCap = value;
             case "lateWave" -> data.respawnLateWave = value;
-            case "grantInterval" -> data.respawnGrantInterval = value;
             case "restMinStep" -> data.restMinStep = value;
             case "restMaxStep" -> data.restMaxStep = value;
             case "restMaxCap" -> data.restMaxCap = value;
@@ -932,6 +940,7 @@ public final class EndlessDefense {
         boolean escaped;
         boolean spawning;
         boolean bossKilled;
+        boolean retrying;
         final Set<UUID> ready = new HashSet<>();
         final Set<UUID> surrenderVotes = new HashSet<>();
         final Set<UUID> mobs = new HashSet<>();
@@ -945,13 +954,9 @@ public final class EndlessDefense {
                 data.wave = Math.max(0, data.wave - 1);
                 data.waveInProgress = false;
                 data.setDirty();
+                retrying = true;
             }
             phase = !started ? Phase.LOBBY : data.gameOver ? Phase.GAME_OVER : Phase.WAITING;
-            if (started && !data.gameOver && data.lastGrantWave == 0) {
-                data.respawns = BalanceRules.initialTickets(data, Math.max(1, server.getPlayerList().getPlayerCount()));
-                data.lastGrantWave = Math.max(1, data.wave);
-                data.setDirty();
-            }
             if (phase == Phase.WAITING) {
                 int min = BalanceRules.restMin(data, data.wave);
                 waitSeconds = min + server.overworld().random.nextInt(BalanceRules.restMax(data, data.wave) - min + 1);

@@ -29,6 +29,10 @@ public final class DefenseGameTests {
             throw new AssertionError("Monster glow team colors missing");
         var wild = helper.spawn(EntityType.ZOMBIE, 0, 1, 0);
         if (wild.isCurrentlyGlowing()) throw new AssertionError("Wild zombie must not glow");
+        var skeleton = helper.spawn(EntityType.SKELETON, 0, 1, 2);
+        if (!wild.isCustomNameVisible() || !skeleton.isCustomNameVisible())
+            throw new AssertionError("Zombie and skeleton health nameplates are missing");
+        if (skeleton.isCurrentlyGlowing()) throw new AssertionError("Wild skeleton must not glow");
         if (runner.getAttributeBaseValue(Attributes.MOVEMENT_SPEED) <= bulwark.getAttributeBaseValue(Attributes.MOVEMENT_SPEED))
             throw new AssertionError("Runner should be faster than bulwark");
         if (bulwark.getAttributeBaseValue(Attributes.ARMOR) < 8)
@@ -97,8 +101,23 @@ public final class DefenseGameTests {
             throw new AssertionError("Night bonus incorrect");
         if (BalanceRules.initialTickets(balance, 1) != 4 || BalanceRules.initialTickets(balance, 2) != 4
                 || BalanceRules.initialTickets(balance, 4) != 5 || BalanceRules.ticketCap(balance, 30, 4) != 1
-                || BalanceRules.chapterGrant(balance, 6, 4) != 2 || BalanceRules.chapterGrant(balance, 7, 4) != 0)
+                || BalanceRules.ticketCap(balance, 1, 1) != 4 || BalanceRules.ticketCap(balance, 15, 4) != 2
+                || BalanceRules.ticketCap(balance, 30, 1) != 1)
             throw new AssertionError("Team respawn balance incorrect");
+        boolean[] covered = new boolean[ShopRules.NAMES.length];
+        for (int id : ShopRules.UPGRADE_IDS) covered[id] = true;
+        for (ShopRules.Category category : ShopRules.Category.values()) {
+            long previous = -1;
+            for (int id : ShopRules.catalog(category)) {
+                if (covered[id] || ShopRules.category(id) != category || ShopRules.cost(id, 0) < previous)
+                    throw new AssertionError("Kiosk category or price order incorrect");
+                covered[id] = true;
+                previous = ShopRules.cost(id, 0);
+            }
+        }
+        for (boolean found : covered) if (!found) throw new AssertionError("Shop product missing from kiosk");
+        if (!ShopRules.NAMES[7].equals("공격력 강화") || !ShopRules.nextEffect(7, 1).contains("+2"))
+            throw new AssertionError("Attack upgrade is not visible or scaled");
         long[] expected = {30, 100, 300, 850, 2000};
         for (int i = 0; i < expected.length; i++)
             if (ShopRules.cost(0, i) != expected[i]) throw new AssertionError("Upgrade price incorrect at " + i);
