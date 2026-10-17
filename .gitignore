@@ -1,0 +1,36 @@
+# Gradle / ForgeGradle outputs
+/.gradle/
+/build/
+/run/
+/run-data/
+/work-jarcheck/
+
+# IDE files
+/.idea/
+/.vscode/
+/.settings/
+/.metadata/
+/bin/
+/out/
+/eclipse/
+*.iml
+*.ipr
+*.iws
+*.launch
+.classpath
+.project
+
+# Local runtime logs and crash dumps outside run/
+*.log
+*.log.gz
+*.hprof
+/logs/
+/crash-reports/
+
+# Forge data-generation cache; keep generated JSON resources trackable
+/src/generated/**/.cache/
+
+# Local downloads and extracted MDK files
+/downloads/
+/forge_README.txt
+/forge*changelog.txt
