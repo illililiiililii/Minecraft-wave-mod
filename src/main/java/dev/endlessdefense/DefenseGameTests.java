@@ -185,15 +185,15 @@ public final class DefenseGameTests {
         for (boolean found : covered) if (!found) throw new AssertionError("Shop product missing from kiosk");
         if (!ShopRules.NAMES[7].equals("공격력 강화") || !ShopRules.nextEffect(7, 1).contains("+2"))
             throw new AssertionError("Attack upgrade is not visible or scaled");
-        long[] expected = {30, 100, 300, 850, 2000};
+        long[] expected = {30, 75, 188, 469, 1172};
         for (int i = 0; i < expected.length; i++)
             if (ShopRules.cost(0, i) != expected[i]) throw new AssertionError("Upgrade price incorrect at " + i);
-        if (ShopRules.cost(0, 5) != -1 || ShopRules.cost(9, 3) != -1
+        if (ShopRules.cost(0, 5) <= expected[4] || ShopRules.cost(9, 3) <= expected[2]
                 || ShopRules.cost(5, 0) != 10000000 || ShopRules.cost(27, 0) != 80
-                || ShopRules.cost(29, 0) != 30 || ShopRules.cost(29, 5) != -1
+                || ShopRules.cost(29, 0) != 30 || ShopRules.cost(29, 5) <= expected[4]
                 || ShopRules.category(31) != ShopRules.Category.UTILITY
                 || ShopRules.category(32) != ShopRules.Category.BUILDING)
-            throw new AssertionError("Max level or endgame price incorrect");
+            throw new AssertionError("Unlimited upgrade or endgame price incorrect");
         if (!DefaultAttributes.getSupplier(EntityType.PLAYER).hasAttribute(Attributes.ATTACK_KNOCKBACK))
             throw new AssertionError("Player has no attack knockback attribute for the new upgrade");
         if (ShopRules.gear(13).length != 2 || ShopRules.gear(13)[0].get(DataComponents.POTION_CONTENTS) == null)
@@ -207,7 +207,7 @@ public final class DefenseGameTests {
         UUID id = UUID.randomUUID();
         data.wave = 1;
         if (data.buy(id, 0) || data.buy(id, -1)) throw new AssertionError("Unfunded or invalid purchase accepted");
-        data.award(id, 430);
+        data.award(id, 293);
         if (!data.buy(id, 0) || !data.buy(id, 0) || !data.buy(id, 0))
             throw new AssertionError("Funded upgrade purchase failed");
         if (data.account(id).coins != 0 || data.account(id).levels[0] != 3 || data.buy(id, 3))
@@ -280,12 +280,13 @@ public final class DefenseGameTests {
             throw new AssertionError("Currency migration applied twice");
         ItemStack sword = new ItemStack(Items.IRON_SWORD);
         var choices = EndlessDefense.infusionOptions(sword, helper.getLevel().registryAccess());
-        if (choices.isEmpty()) throw new AssertionError("Weapon infusion has no compatible enchantments");
-        sword.enchant(choices.get(0), 1);
+        var repeatable = choices.stream().filter(enchantment -> enchantment.value().getMaxLevel() > 1).findFirst();
+        if (repeatable.isEmpty()) throw new AssertionError("Weapon infusion has no repeatable enchantments");
+        sword.enchant(repeatable.get(), 1);
         if (sword.get(DataComponents.ENCHANTMENTS) == null
-                || EndlessDefense.infusionOptions(sword, helper.getLevel().registryAccess()).contains(choices.get(0))
+                || !EndlessDefense.infusionOptions(sword, helper.getLevel().registryAccess()).contains(repeatable.get())
                 || !EndlessDefense.infusionOptions(new ItemStack(Items.BREAD), helper.getLevel().registryAccess()).isEmpty())
-            throw new AssertionError("Direct weapon enchantment or compatibility filter failed");
+            throw new AssertionError("Repeatable weapon enchantment or compatibility filter failed");
         helper.succeed();
     }
 

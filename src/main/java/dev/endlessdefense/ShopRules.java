@@ -11,9 +11,8 @@ import java.util.Comparator;
 public final class ShopRules {
     private ShopRules() {}
     public static final int TURRET_ID = 35, TURRET_UPGRADE_ID = 36, TURRET_REPAIR_ID = 37;
-    public static final int MAX_TURRETS = 4, MAX_TURRET_LEVEL = 5;
-    public static final long TURRET_PRICE = 3000, TURRET_REPAIR_PRICE = 700;
-    private static final long[] TURRET_UPGRADE_COSTS = {2500, 5500, 9500, 16000};
+    public static final int MAX_TURRETS = 4;
+    public static final long TURRET_PRICE = 400, TURRET_REPAIR_PRICE = 200;
     public enum Category {
         FOOD("음식"), UTILITY("유용한 아이템"), ARMOR("방어구"), BUILDING("건축");
         private final String title;
@@ -21,7 +20,6 @@ public final class ShopRules {
         public String title() { return title; }
     }
     public record Product(String name, String description, long price, int unlockWave, int perWave, ItemStack[] items) {}
-    public static final long[] UPGRADE_COSTS = {30, 100, 300, 850, 2000};
     public static final int[] UPGRADE_IDS = {0, 1, 2, 6, 7, 8, 9, 29};
     public static final String[] NAMES = {
             "빠른 채굴", "추가 체력", "이동 속도", "철 장비 꾸러미", "다이아 장비 꾸러미", "종결 네더라이트 장비",
@@ -39,7 +37,7 @@ public final class ShopRules {
             gear("다이아 장비 꾸러미", "검·곡괭이·방어구", 18000, 12, 0, Items.DIAMOND_SWORD, Items.DIAMOND_PICKAXE, Items.DIAMOND_HELMET, Items.DIAMOND_CHESTPLATE, Items.DIAMOND_LEGGINGS, Items.DIAMOND_BOOTS),
             gear("종결 네더라이트 장비", "검·곡괭이·방어구", 10000000, 40, 1, Items.NETHERITE_SWORD, Items.NETHERITE_PICKAXE, Items.NETHERITE_HELMET, Items.NETHERITE_CHESTPLATE, Items.NETHERITE_LEGGINGS, Items.NETHERITE_BOOTS),
             upgrade("방어 강화", "방어력 +1/단계"), upgrade("공격력 강화", "근접 공격력 +1/단계"),
-            upgrade("회복 능력", "재생 I~II (3·5단계 해금)"), upgrade("정찰 강화", "위협 정보·보스 표시 해금"),
+            upgrade("회복 능력", "지속 회복 +0.5/단계 · 재생 I~II 해금"), upgrade("정찰 강화", "위협 정보·보스 표시 · 웨이브 적 피해 +1%/단계"),
             supply("빵 ×8", "초반 식량", 30, 1, 0, new ItemStack(Items.BREAD, 8)),
             supply("구운 소고기 ×8", "고효율 식량", 60, 1, 0, new ItemStack(Items.COOKED_BEEF, 8)),
             supply("황금 사과", "전투 생존", 350, 5, 2, new ItemStack(Items.GOLDEN_APPLE)),
@@ -71,11 +69,11 @@ public final class ShopRules {
                     new ItemStack(Items.DISPENSER, 4), new ItemStack(Items.ARROW, 32)),
             supply("바람 구체 ×4", "적을 밀어내는 방어용 투척물", 420, 4, 2,
                     new ItemStack(Items.WIND_CHARGE, 4)),
-            supply("자동 사냥 포탑", "디펜스 야생 거점에 팀 포탑 설치 · 최대 4기", TURRET_PRICE, 3, 0,
+            supply("자동 사냥 포탑", "디펜스 야생 거점에 약한 팀 포탑 설치 · 최대 4기", TURRET_PRICE, 1, 0,
                     new ItemStack(Items.DISPENSER)),
-            supply("포탑 강화", "팀 포탑 중 최저 레벨 1기 강화 · 최대 5단계", 0, 6, 0,
+            supply("포탑 강화", "팀 포탑 중 최저 레벨 1기 강화 · 단계 제한 없음", 0, 1, 0,
                     new ItemStack(Items.CROSSBOW)),
-            supply("포탑 수리", "파손된 팀 포탑 1기 재가동 · 아래 상자는 보존", TURRET_REPAIR_PRICE, 3, 0,
+            supply("포탑 수리", "파손된 팀 포탑 1기 재가동 · 아래 상자는 보존", TURRET_REPAIR_PRICE, 1, 0,
                     new ItemStack(Items.ANVIL))
     };
 
@@ -113,18 +111,19 @@ public final class ShopRules {
         for (int i = 0; i < UPGRADE_IDS.length; i++) if (UPGRADE_IDS[i] == id) return i;
         return -1;
     }
-    public static int maxLevel(int id) { return id == 9 ? 3 : UPGRADE_COSTS.length; }
+    public static int maxLevel(int id) { return Integer.MAX_VALUE; }
     public static String nextEffect(int id, int level) {
-        if (level >= maxLevel(id)) return "최대 레벨";
+        if (level == Integer.MAX_VALUE) return "레벨 저장 한계";
         int next = level + 1;
         return switch (id) {
             case 0 -> "성급함 " + next + "단계";
-            case 1 -> "최대 체력 +" + (next * 4);
+            case 1 -> "최대 체력 +" + (next * 4L);
             case 2 -> "신속 " + next + "단계";
             case 6 -> "방어력 +" + next;
             case 7 -> "근접 공격력 +" + next;
             case 8 -> "10초마다 체력 +" + (next * 0.5) + (next >= 5 ? " · 재생 II" : next >= 3 ? " · 재생 I" : "");
-            case 9 -> next == 1 ? "다음 보스 웨이브 표시" : next == 2 ? "발광 색상 범례 표시" : "적 체력 배율 표시";
+            case 9 -> next == 1 ? "다음 보스 웨이브 표시 · 피해 +1%" : next == 2 ? "발광 색상 범례 · 피해 +2%"
+                    : next == 3 ? "적 체력 배율 · 피해 +3%" : "웨이브 적 대상 피해 +" + next + "%";
             case 29 -> "근접 넉백 +" + (next * 0.2);
             default -> "";
         };
@@ -132,18 +131,29 @@ public final class ShopRules {
     public static long cost(int product, int level) {
         Product item = product(product);
         if (item == null) return -1;
-        if (product == TURRET_UPGRADE_ID) return turretUpgradeCost(level);
-        if (upgradeSlot(product) >= 0) return level >= 0 && level < maxLevel(product) ? UPGRADE_COSTS[level] : -1;
+        if (product == TURRET_UPGRADE_ID) return turretUpgradeCost(level, 250, 80);
+        if (upgradeSlot(product) >= 0) return upgradeCost(level, 30, 150);
         return item.price();
     }
-    public static long turretUpgradeCost(int level) {
-        return level >= 1 && level < MAX_TURRET_LEVEL ? TURRET_UPGRADE_COSTS[level - 1] : -1;
+    public static long upgradeCost(int level, int base, int growthPercent) {
+        if (level < 0 || level == Integer.MAX_VALUE) return -1;
+        double value = base * Math.pow(1.0 + growthPercent / 100.0, level);
+        return value >= Long.MAX_VALUE ? Long.MAX_VALUE : Math.max(1, (long) Math.ceil(value));
     }
-    public static float turretDamage(int level) { return 2.0f + level * 2.0f; }
-    public static int turretInterval(int level) { return Math.max(16, 36 - level * 4); }
-    public static int turretRange(int level) { return 23 + level * 2; }
+    public static long turretUpgradeCost(int level, int base, int growthPercent) {
+        return level >= 1 ? upgradeCost(level - 1, base, growthPercent) : -1;
+    }
+    public static float turretDamage(int level, int baseTenths, int stepTenths) {
+        return (float) ((baseTenths + Math.max(0L, (long) level - 1) * stepTenths) / 10.0);
+    }
+    public static int turretInterval(int level, int base, int step) {
+        return (int) Math.max(10L, base - Math.max(0L, (long) level - 1) * step);
+    }
+    public static int turretRange(int level, int base, int step) {
+        return (int) Math.min(64L, base + Math.max(0L, (long) level - 1) * step);
+    }
     public static int lowestTurretLevel(int[] levels) {
-        int lowest = MAX_TURRET_LEVEL;
+        int lowest = Integer.MAX_VALUE;
         for (int level : levels) if (level > 0) lowest = Math.min(lowest, level);
         return lowest;
     }
@@ -160,9 +170,12 @@ public final class ShopRules {
         return copy;
     }
     public static int enemyCount(int base, int players, int wave) {
+        return enemyCount(base, players, wave, 128);
+    }
+    public static int enemyCount(int base, int players, int wave, int cap) {
         if (players <= 0) return 0;
         long count = (long) base + (long) (players - 1) * (base + 2L) + 2L * Math.max(0, wave - 1) * players;
-        return (int) Math.min(128, count);
+        return (int) Math.min(cap, count);
     }
     public static long reward(int wave) { return BalanceRules.clearReward(new WaveData(), wave); }
 }

@@ -43,7 +43,7 @@ final class TurretSystem {
         if (!data.started || data.gameOver || data.eliminated.contains(player.getUUID()))
             return "진행 중인 게임의 생존자만 포탑을 구매할 수 있습니다.";
         ShopRules.Product offer = ShopRules.product(product);
-        if (offer == null || data.wave < offer.unlockWave())
+        if (offer == null || data.wave < data.shopUnlock(product))
             return "이 상품은 아직 해금되지 않았습니다.";
 
         int slot = -1;
@@ -59,15 +59,16 @@ final class TurretSystem {
                 if (distance < nearest) { nearest = distance; slot = i; }
             }
             if (slot < 0) return "빈 포탑 자리가 없습니다. 거점의 네 설치 지점을 비워 주세요.";
-            price = ShopRules.TURRET_PRICE;
+            price = data.shopPrice(product);
         } else if (product == ShopRules.TURRET_UPGRADE_ID) {
-            int lowest = ShopRules.MAX_TURRET_LEVEL;
+            int lowest = Integer.MAX_VALUE;
             for (int i = 0; i < data.turretLevels.length; i++)
                 if (data.turretLevels[i] > 0 && data.turretLevels[i] < lowest) {
                     lowest = data.turretLevels[i]; slot = i;
                 }
-            if (slot < 0) return "강화할 포탑이 없거나 모든 포탑이 최고 단계입니다.";
-            price = ShopRules.turretUpgradeCost(lowest);
+            if (slot < 0 || lowest == Integer.MAX_VALUE) return "강화할 포탑이 없습니다.";
+            price = ShopRules.turretUpgradeCost(lowest,
+                    data.number("turretUpgradeBase", 250), data.number("turretUpgradeGrowth", 80));
         } else if (product == ShopRules.TURRET_REPAIR_ID) {
             double nearest = Double.MAX_VALUE;
             for (int i = 0; i < data.turretLevels.length; i++) {
@@ -77,10 +78,11 @@ final class TurretSystem {
                 if (distance < nearest) { nearest = distance; slot = i; }
             }
             if (slot < 0) return "수리 가능한 포탑이 없습니다. 파손된 자리에 다른 블록이 있다면 치워 주세요.";
-            price = ShopRules.TURRET_REPAIR_PRICE;
+            price = data.shopPrice(product);
         } else return "알 수 없는 포탑 상품입니다.";
 
         WaveData.Account account = data.account(player.getUUID());
+        if (price < 0) return "포탑 레벨 저장 한계에 도달했습니다.";
         if (account.coins < price) return "노드가 부족합니다. 필요 노드: " + price;
         if ((product == ShopRules.TURRET_ID || product == ShopRules.TURRET_REPAIR_ID)
                 && !place(level, base(data, slot), slot, product == ShopRules.TURRET_REPAIR_ID))
@@ -99,12 +101,14 @@ final class TurretSystem {
         for (int i = 0; i < data.turretLevels.length; i++) {
             int levelValue = data.turretLevels[i];
             if (levelValue <= 0) continue;
-            int interval = ShopRules.turretInterval(levelValue);
+            int interval = ShopRules.turretInterval(levelValue,
+                    data.number("turretInterval", 80), data.number("turretIntervalStep", 12));
             if ((tick + i * 7) % interval != 0) continue;
             BlockPos base = base(data, i);
             if (!level.isLoaded(base) || !operational(level, base)) continue;
             Vec3 muzzle = Vec3.atCenterOf(base.above(2)).add(0, 0.65, 0);
-            int range = ShopRules.turretRange(levelValue);
+            int range = ShopRules.turretRange(levelValue,
+                    data.number("turretRange", 14), data.number("turretRangeStep", 3));
             Monster target = null;
             double nearest = (double) range * range;
             for (Monster mob : level.getEntitiesOfClass(Monster.class, new AABB(base).inflate(range))) {
@@ -126,7 +130,8 @@ final class TurretSystem {
             level.playSound(null, base, SoundEvents.ARROW_SHOOT, SoundSource.BLOCKS, 0.4f, 1.1f);
             FIRING.put(target.getUUID(), base);
             try {
-                target.hurt(level.damageSources().magic(), ShopRules.turretDamage(levelValue));
+                target.hurt(level.damageSources().magic(), ShopRules.turretDamage(levelValue,
+                        data.number("turretDamage", 10), data.number("turretDamageStep", 10)));
             } finally {
                 FIRING.remove(target.getUUID());
             }

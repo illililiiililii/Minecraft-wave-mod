@@ -30,6 +30,7 @@ public final class WaveData extends SavedData {
     public final Set<UUID> restoreSurvival = new HashSet<>();
     public final Set<UUID> teamMembers = new HashSet<>();
     private final Map<UUID, Account> accounts = new HashMap<>();
+    private final Map<String, Integer> numericSettings = new HashMap<>();
     public int baseMobs = 4, healthPercent = 100, damagePercent = 100, awareness = 2, armorBonus = 0, gearChance = 15;
     public int earlyReward = 100, earlyRewardStep = 30, midRewardStep = 60, lateRewardStep = 90;
     public int killRewardEvery = 4, killBounty = 8, bossReward = 150;
@@ -54,8 +55,8 @@ public final class WaveData extends SavedData {
         d.defenseMapY = tag.getInt("defenseMapY");
         d.defenseMapZ = tag.getInt("defenseMapZ");
         for (int i = 0; i < d.turretLevels.length; i++)
-            d.turretLevels[i] = Math.max(0, Math.min(ShopRules.MAX_TURRET_LEVEL, tag.getInt("turretLevel" + i)));
-        d.earlyBonusThroughWave = Math.max(0, Math.min(5, tag.getInt("earlyBonusThroughWave")));
+            d.turretLevels[i] = Math.max(0, tag.getInt("turretLevel" + i));
+        d.earlyBonusThroughWave = Math.max(0, Math.min(30, tag.getInt("earlyBonusThroughWave")));
         boolean legacyEconomy = tag.getInt("economyVersion") < 1;
         d.respawns = Math.max(0, tag.getInt("respawns"));
         d.lastGrantWave = Math.max(0, tag.getInt("lastGrantWave"));
@@ -71,7 +72,7 @@ public final class WaveData extends SavedData {
             long savedCoins = Math.max(0, entry.getLong("coins"));
             a.coins = legacyEconomy ? (savedCoins > Long.MAX_VALUE / 10 ? Long.MAX_VALUE : savedCoins * 10) : savedCoins;
             for (int j = 0; j < a.levels.length; j++)
-                a.levels[j] = Math.max(0, Math.min(ShopRules.maxLevel(ShopRules.UPGRADE_IDS[j]), entry.getInt("upgrade" + j)));
+                a.levels[j] = Math.max(0, entry.getInt("upgrade" + j));
             a.stockWave = Math.max(0, entry.getInt("stockWave"));
             a.pendingInfusions = Math.max(0, Math.min(32, entry.getInt("pendingInfusions")));
             for (int j = 0; j < a.stock.length; j++) a.stock[j] = Math.max(0, entry.getInt("stock" + j));
@@ -100,7 +101,7 @@ public final class WaveData extends SavedData {
                 : bounded(tag, "bossReward", 150, 0, 2000);
         d.restMinStep = bounded(tag, "restMinStep", 2, 0, 10);
         d.restMaxStep = bounded(tag, "restMaxStep", 3, 0, 15);
-        d.restMaxCap = bounded(tag, "restMaxCap", 180, 60, 180);
+        d.restMaxCap = bounded(tag, "restMaxCap", 180, 60, 300);
         d.earlyBonusAmount = bounded(tag, "earlyBonusAmount", 250, 0, 1000);
         d.infuserChancePercent = bounded(tag, "infuserChancePercent", 1, 0, 100);
         d.nightPercent = bounded(tag, "nightPercent", 15, 0, 25);
@@ -108,6 +109,13 @@ public final class WaveData extends SavedData {
         d.respawnEarlyCap = bounded(tag, "respawnEarlyCap", 8, 1, 20);
         d.respawnLateWave = bounded(tag, "respawnLateWave", 30, 10, 200);
         d.respawnGrantInterval = bounded(tag, "respawnGrantInterval", 5, 2, 20);
+        CompoundTag settings = tag.getCompound("numericSettings");
+        for (AdminSettings.Entry entry : AdminSettings.ENTRIES) {
+            if (!settings.contains(entry.key())) continue;
+            int value = settings.getInt(entry.key());
+            if (value >= entry.min() && value <= entry.max())
+                d.numericSettings.put(entry.key(), value);
+        }
         return d;
     }
     private static int bounded(CompoundTag tag, String key, int fallback, int min, int max) {
@@ -162,10 +170,27 @@ public final class WaveData extends SavedData {
         tag.putInt("nightPercent", nightPercent); tag.putInt("nightCap", nightCap);
         tag.putInt("respawnEarlyCap", respawnEarlyCap); tag.putInt("respawnLateWave", respawnLateWave);
         tag.putInt("respawnGrantInterval", respawnGrantInterval);
+        CompoundTag settings = new CompoundTag();
+        numericSettings.forEach(settings::putInt);
+        tag.put("numericSettings", settings);
         return tag;
     }
 
     public Account account(UUID id) { return accounts.computeIfAbsent(id, ignored -> new Account()); }
+    public int number(String key, int fallback) { return numericSettings.getOrDefault(key, fallback); }
+    public void setNumber(String key, int value) { numericSettings.put(key, value); setDirty(); }
+    public int shopPrice(int id) {
+        ShopRules.Product item = ShopRules.product(id);
+        return item == null ? 0 : number("price:" + id, (int) item.price());
+    }
+    public int shopUnlock(int id) {
+        ShopRules.Product item = ShopRules.product(id);
+        return item == null ? Integer.MAX_VALUE : number("unlock:" + id, item.unlockWave());
+    }
+    public int shopCap(int id) {
+        ShopRules.Product item = ShopRules.product(id);
+        return item == null ? 0 : number("cap:" + id, item.perWave());
+    }
     public void resetRun() {
         wave = 0;
         earlyBonusThroughWave = 0;
@@ -192,16 +217,18 @@ public final class WaveData extends SavedData {
         if (product == ShopRules.TURRET_ID || product == ShopRules.TURRET_UPGRADE_ID
                 || product == ShopRules.TURRET_REPAIR_ID) return false;
         ShopRules.Product item = ShopRules.product(product);
-        if (item == null || wave < item.unlockWave() || eliminated.contains(id)) return false;
+        if (item == null || wave < shopUnlock(product) || eliminated.contains(id)) return false;
         Account a = account(id);
         int slot = ShopRules.upgradeSlot(product);
-        long price = ShopRules.cost(product, slot >= 0 ? a.levels[slot] : 0);
+        long price = slot >= 0 ? ShopRules.upgradeCost(a.levels[slot],
+                number("upgradeBase", 30), number("upgradeGrowth", 150)) : shopPrice(product);
         if (price < 0 || a.coins < price) return false;
         if (a.stockWave != wave) { a.stockWave = wave; Arrays.fill(a.stock, 0); }
-        if (item.perWave() > 0 && a.stock[product] >= item.perWave()) return false;
+        int cap = shopCap(product);
+        if (cap > 0 && a.stock[product] >= cap) return false;
         a.coins -= price;
         if (slot >= 0) a.levels[slot]++;
-        if (item.perWave() > 0) a.stock[product]++;
+        if (cap > 0) a.stock[product]++;
         setDirty();
         return true;
     }

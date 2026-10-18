@@ -6,6 +6,7 @@ import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.ZombieRenderer;
@@ -40,7 +41,8 @@ public final class ClientVisuals {
     private static EndlessDefense.StatusPacket status = new EndlessDefense.StatusPacket(
             0, 0, 0, -1, false, 0, 0, 0, "", false, 4, 100, 100, 2, 0, 15,
             1, false, new int[ShopRules.MAX_TURRETS], 0, 0,
-            new int[ShopRules.UPGRADE_IDS.length], new int[ShopRules.NAMES.length], 0, false, 0, false);
+            new int[ShopRules.UPGRADE_IDS.length], new int[ShopRules.NAMES.length],
+            AdminSettings.defaults(), 0, false, 0, false);
 
     public static void accept(EndlessDefense.StatusPacket newStatus) { status = newStatus; }
 
@@ -63,7 +65,7 @@ public final class ClientVisuals {
                     if (mc.player == null || mc.options.hideGui) return;
                     int x = 8, y = 8;
                     graphics.fill(x - 4, y - 4, x + (status.defenseWorld() ? 395 : 285),
-                            y + 62 + status.upgrades()[6] * 11, 0x990A1119);
+                            y + 62 + Math.min(3, status.upgrades()[6]) * 11, 0x990A1119);
                     graphics.drawString(mc.font, "Endless Defense  |  웨이브 " + status.wave()
                             + "  최고 " + status.highest(), x, y, 0xFFD480, true);
                     String state = status.phase() == 3 ? "게임 오버 · 종료 투표 가능"
@@ -86,7 +88,10 @@ public final class ClientVisuals {
                         graphics.drawString(mc.font, "빨강 보스 · 보라 주입자 · 금색 수호자 · 하늘색 추적자", x, y + 66, 0x99DDFF, true);
                     if (status.upgrades()[6] >= 3)
                         graphics.drawString(mc.font, "현재 적 체력 배율 ×" + String.format(java.util.Locale.ROOT, "%.1f",
-                                BalanceRules.healthMultiplier(Math.max(1, status.wave()))), x, y + 77, 0x99DDFF, true);
+                                BalanceRules.healthMultiplier(Math.max(1, status.wave()),
+                                        AdminSettings.value(status.adminValues(), "healthGrowth"),
+                                        AdminSettings.value(status.adminValues(), "healthCap"))),
+                                x, y + 77, 0x99DDFF, true);
                 });
     }
 
@@ -256,9 +261,15 @@ public final class ClientVisuals {
 
         private long price(int id) {
             if (id == ShopRules.TURRET_UPGRADE_ID)
-                return ShopRules.turretUpgradeCost(ShopRules.lowestTurretLevel(status.turretLevels()));
+                return ShopRules.turretUpgradeCost(ShopRules.lowestTurretLevel(status.turretLevels()),
+                        setting("turretUpgradeBase"), setting("turretUpgradeGrowth"));
             int slot = ShopRules.upgradeSlot(id);
-            return ShopRules.cost(id, slot >= 0 ? status.upgrades()[slot] : 0);
+            return slot >= 0 ? ShopRules.upgradeCost(status.upgrades()[slot],
+                    setting("upgradeBase"), setting("upgradeGrowth")) : setting("price:" + id);
+        }
+
+        private int setting(String key) {
+            return AdminSettings.value(status.adminValues(), key);
         }
 
         private static ItemStack icon(int id) {
@@ -357,13 +368,21 @@ public final class ClientVisuals {
                     int slot = ShopRules.upgradeSlot(id);
                     String detail = slot >= 0 ? ShopRules.nextEffect(id, status.upgrades()[slot])
                             : ShopRules.product(id).description();
-                    if (id == ShopRules.TURRET_ID) detail += " · 공격 4 · 사거리 25 · 32틱마다 발사";
+                    if (id == ShopRules.TURRET_ID) detail += " · 공격 "
+                            + ShopRules.turretDamage(1, setting("turretDamage"), setting("turretDamageStep"))
+                            + " · 사거리 " + ShopRules.turretRange(1, setting("turretRange"), setting("turretRangeStep"))
+                            + " · " + ShopRules.turretInterval(1, setting("turretInterval"), setting("turretIntervalStep"))
+                            + "틱마다 발사";
                     if (id == ShopRules.TURRET_UPGRADE_ID) {
-                        int next = ShopRules.lowestTurretLevel(status.turretLevels()) + 1;
-                        if (next <= ShopRules.MAX_TURRET_LEVEL)
-                            detail += " · 다음 " + next + "단계: 공격 " + (int) ShopRules.turretDamage(next)
-                                    + " · 사거리 " + ShopRules.turretRange(next)
-                                    + " · " + ShopRules.turretInterval(next) + "틱마다 발사";
+                        int lowest = ShopRules.lowestTurretLevel(status.turretLevels());
+                        if (lowest < Integer.MAX_VALUE) {
+                            int next = lowest + 1;
+                            detail += " · 다음 " + next + "단계: 공격 "
+                                    + ShopRules.turretDamage(next, setting("turretDamage"), setting("turretDamageStep"))
+                                    + " · 사거리 " + ShopRules.turretRange(next, setting("turretRange"), setting("turretRangeStep"))
+                                    + " · " + ShopRules.turretInterval(next, setting("turretInterval"), setting("turretIntervalStep"))
+                                    + "틱마다 발사";
+                        }
                     }
                     graphics.renderTooltip(font, Component.literal(ShopRules.NAMES[id] + " · " + detail), mouseX, mouseY);
                     break;
@@ -374,8 +393,9 @@ public final class ClientVisuals {
         private void updatePurchaseButton(Button button, int id) {
             ShopRules.Product product = ShopRules.product(id);
             long price = price(id);
-            int stock = product.perWave() > 0 ? product.perWave() - status.stock()[id] : 1;
-            boolean unlocked = status.wave() >= product.unlockWave();
+            int cap = setting("cap:" + id);
+            int stock = cap > 0 ? cap - status.stock()[id] : 1;
+            boolean unlocked = status.wave() >= setting("unlock:" + id);
             boolean turret = id >= ShopRules.TURRET_ID && id <= ShopRules.TURRET_REPAIR_ID;
             boolean available = id == ShopRules.TURRET_ID ? ShopRules.turretCount(status.turretLevels()) < ShopRules.MAX_TURRETS
                     : id == ShopRules.TURRET_UPGRADE_ID ? price >= 0 : id != ShopRules.TURRET_REPAIR_ID || status.brokenTurrets() > 0;
@@ -390,73 +410,142 @@ public final class ClientVisuals {
             int slot = ShopRules.upgradeSlot(id);
             int level = slot >= 0 ? status.upgrades()[slot] : 0;
             long price = price(id);
-            int textColor = status.wave() < product.unlockWave() ? 0x888888 : 0xFFFFFF;
+            int textColor = status.wave() < setting("unlock:" + id) ? 0x888888 : 0xFFFFFF;
             graphics.fill(x + 2, y, x + cardWidth - 2, y + (upgrade ? 52 : 49), 0xBB15232E);
             graphics.drawCenteredString(font, font.plainSubstrByWidth(product.name(), cardWidth - 8),
                     x + cardWidth / 2, y + 3, textColor);
             graphics.renderItem(icon(id), x + cardWidth / 2 - 8, y + (upgrade ? 15 : 13));
             if (upgrade)
-                graphics.drawCenteredString(font, "레벨 " + level + "/" + ShopRules.maxLevel(id),
+                graphics.drawCenteredString(font, "레벨 " + level,
                         x + cardWidth / 2, y + 33, 0x99DDFF);
             else if (id == ShopRules.TURRET_ID || id == ShopRules.TURRET_UPGRADE_ID || id == ShopRules.TURRET_REPAIR_ID)
                 graphics.drawCenteredString(font, "포탑 " + ShopRules.turretCount(status.turretLevels()) + "/4"
                                 + (status.brokenTurrets() > 0 ? " · 파손 " + status.brokenTurrets() : ""),
                         x + cardWidth / 2, y + 30, 0x99DDFF);
-            else if (product.perWave() > 0)
-                graphics.drawCenteredString(font, "재고 " + Math.max(0, product.perWave() - status.stock()[id]),
+            else if (setting("cap:" + id) > 0)
+                graphics.drawCenteredString(font, "재고 " + Math.max(0, setting("cap:" + id) - status.stock()[id]),
                         x + cardWidth / 2, y + 30, 0xAAAAAA);
             String priceLabel = id == ShopRules.TURRET_UPGRADE_ID && price < 0
                     && ShopRules.turretCount(status.turretLevels()) == 0 ? "포탑 필요"
-                    : price < 0 ? "최대 레벨" : price + " 노드";
+                    : price < 0 ? "저장 한계" : price + " 노드";
             graphics.drawCenteredString(font, priceLabel,
                     x + cardWidth / 2, y + (upgrade ? 44 : 41), 0xFFD480);
         }
     }
 
     private static final class AdminScreen extends Screen {
-        private static final String[] LABELS = {"기본 적 수", "체력 %", "공격력 %", "탐지 단계", "추가 방어력", "장비 확률 %", "마력 주입 몹 %"};
-        private static final int[] STEPS = {1, 25, 25, 1, 1, 5, 1};
-        private static final int[] MIN = {1, 25, 25, 1, 0, 0, 0};
-        private static final int[] MAX = {128, 500, 500, 5, 20, 100, 100};
-
+        private final Button[] rows = new Button[AdminSettings.PAGE_SIZE];
+        private final Button[] minus = new Button[AdminSettings.PAGE_SIZE];
+        private final Button[] plus = new Button[AdminSettings.PAGE_SIZE];
+        private Button previous, next;
+        private EditBox input;
+        private AdminSettings.Group group = AdminSettings.Group.COMBAT;
+        private int page, selected = -1, top;
+        private String inputError = "";
         private AdminScreen() { super(Component.literal("Endless Defense 관리자 설정")); }
 
         @Override protected void init() {
             if (!status.canConfigure()) { onClose(); return; }
-            int y0 = height / 2 - 80;
-            for (int i = 0; i < LABELS.length; i++) {
-                final int option = i;
-                final int y = y0 + i * 24;
-                addRenderableWidget(Button.builder(Component.literal("−"), button -> change(option, -STEPS[option]))
-                        .bounds(width / 2 + 55, y, 22, 20).build());
-                addRenderableWidget(Button.builder(Component.literal("+"), button -> change(option, STEPS[option]))
-                        .bounds(width / 2 + 82, y, 22, 20).build());
+            top = Math.max(4, (height - 230) / 2);
+            AdminSettings.Group[] groups = AdminSettings.Group.values();
+            int tabWidth = (width - 12) / groups.length;
+            for (int i = 0; i < groups.length; i++) {
+                final AdminSettings.Group chosen = groups[i];
+                addRenderableWidget(Button.builder(Component.literal(chosen.title()), button -> {
+                    group = chosen;
+                    page = 0;
+                    selected = -1;
+                    input.setValue("");
+                }).bounds(6 + i * tabWidth, top, tabWidth - 2, 18).build());
             }
+            for (int i = 0; i < rows.length; i++) {
+                final int row = i;
+                int y = top + 40 + i * 22;
+                rows[i] = addRenderableWidget(Button.builder(Component.empty(), button -> select(entryAt(row)))
+                        .bounds(width / 2 - 150, y, 198, 20).build());
+                minus[i] = addRenderableWidget(Button.builder(Component.literal("−"), button -> change(row, -1))
+                        .bounds(width / 2 + 52, y, 24, 20).build());
+                plus[i] = addRenderableWidget(Button.builder(Component.literal("+"), button -> change(row, 1))
+                        .bounds(width / 2 + 80, y, 24, 20).build());
+            }
+            previous = addRenderableWidget(Button.builder(Component.literal("‹ 이전"), button -> page = Math.max(0, page - 1))
+                    .bounds(width / 2 - 112, top + 152, 70, 20).build());
+            next = addRenderableWidget(Button.builder(Component.literal("다음 ›"), button -> page = Math.min(pageCount() - 1, page + 1))
+                    .bounds(width / 2 + 42, top + 152, 70, 20).build());
+            input = addRenderableWidget(new EditBox(font, width / 2 - 55, top + 177, 110, 19,
+                    Component.literal("설정값 입력")));
+            input.setFilter(value -> value.matches("-?\\d*"));
+            if (selected >= 0) input.setValue(Integer.toString(status.adminValues()[selected]));
+            addRenderableWidget(Button.builder(Component.literal("적용"), button -> applyInput())
+                    .bounds(width / 2 + 60, top + 177, 52, 19).build());
             addRenderableWidget(Button.builder(Component.literal("돌아가기"), button -> onClose())
-                    .bounds(width / 2 - 80, height / 2 + 87, 160, 20).build());
+                    .bounds(width / 2 - 80, top + 202, 160, 20).build());
         }
 
-        private void change(int option, int delta) {
-            if (!status.canConfigure()) return;
-            int[] values = {status.baseMobs(), status.healthPercent(), status.damagePercent(),
-                    status.awareness(), status.armorBonus(), status.gearChance(), status.infuserChance()};
-            int value = Math.max(MIN[option], Math.min(MAX[option], values[option] + delta));
-            if (value != values[option]) EndlessDefense.requestConfig(option, value);
+        private int pageCount() {
+            return Math.max(1, (AdminSettings.indices(group).size() + AdminSettings.PAGE_SIZE - 1)
+                    / AdminSettings.PAGE_SIZE);
+        }
+
+        private int entryAt(int row) {
+            var entries = AdminSettings.indices(group);
+            int position = page * AdminSettings.PAGE_SIZE + row;
+            return position < entries.size() ? entries.get(position) : -1;
+        }
+
+        private void select(int index) {
+            if (index < 0) return;
+            selected = index;
+            input.setValue(Integer.toString(status.adminValues()[index]));
+            inputError = "";
+        }
+
+        private void change(int row, int direction) {
+            int index = entryAt(row);
+            if (index < 0 || !status.canConfigure()) return;
+            AdminSettings.Entry entry = AdminSettings.ENTRIES.get(index);
+            long target = (long) status.adminValues()[index] + (long) direction * entry.step();
+            int value = (int) Math.max(entry.min(), Math.min(entry.max(), target));
+            select(index);
+            input.setValue(Integer.toString(value));
+            if (value != status.adminValues()[index]) EndlessDefense.requestConfig(index, value);
+        }
+
+        private void applyInput() {
+            if (selected < 0 || !status.canConfigure()) return;
+            try {
+                int value = Integer.parseInt(input.getValue());
+                AdminSettings.Entry entry = AdminSettings.ENTRIES.get(selected);
+                if (value < entry.min() || value > entry.max()) {
+                    inputError = "허용 범위: " + entry.min() + "~" + entry.max();
+                    return;
+                }
+                EndlessDefense.requestConfig(selected, value);
+                inputError = "";
+            } catch (NumberFormatException exception) {
+                inputError = "정수를 입력하세요";
+            }
         }
 
         @Override public void onClose() { Minecraft.getInstance().setScreen(new StatusScreen()); }
 
         @Override public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-            super.render(graphics, mouseX, mouseY, partialTick);
-            graphics.drawCenteredString(font, title, width / 2, height / 2 - 96, 0xFFD480);
-            int[] values = {status.baseMobs(), status.healthPercent(), status.damagePercent(),
-                    status.awareness(), status.armorBonus(), status.gearChance(), status.infuserChance()};
-            int y0 = height / 2 - 80;
-            for (int i = 0; i < LABELS.length; i++) {
-                graphics.drawString(font, LABELS[i] + ": " + values[i], width / 2 - 105, y0 + i * 24 + 6,
-                        0xFFFFFF, true);
+            previous.active = page > 0;
+            next.active = page + 1 < pageCount();
+            for (int i = 0; i < rows.length; i++) {
+                int index = entryAt(i);
+                rows[i].visible = minus[i].visible = plus[i].visible = index >= 0;
+                if (index < 0) continue;
+                AdminSettings.Entry entry = AdminSettings.ENTRIES.get(index);
+                rows[i].setMessage(Component.literal(font.plainSubstrByWidth(
+                        (index == selected ? "● " : "") + entry.label() + ": " + status.adminValues()[index], 186)));
             }
-            graphics.drawCenteredString(font, "변경 사항은 다음 웨이브부터 적용", width / 2, height / 2 + 74, 0xAAAAAA);
+            super.render(graphics, mouseX, mouseY, partialTick);
+            graphics.drawCenteredString(font, group.title() + " 설정 · " + (page + 1) + "/" + pageCount(),
+                    width / 2, top + 24, 0xFFD480);
+            graphics.drawCenteredString(font, selected < 0 ? "행을 선택한 뒤 숫자를 입력하세요" : inputError.isEmpty()
+                    ? "선택값 입력 후 적용 · 변경은 다음 계산부터" : inputError,
+                    width / 2, top + 225, inputError.isEmpty() ? 0xAAAAAA : 0xFF7777);
         }
     }
 
