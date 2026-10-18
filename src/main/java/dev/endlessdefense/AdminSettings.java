@@ -8,7 +8,7 @@ import java.util.Map;
 /** Shared, validated numeric settings catalog for the OP screen and server packets. */
 final class AdminSettings {
     enum Group {
-        COMBAT("전투"), ECONOMY("보상"), TIMING("시간·부활"), TURRET("포탑"),
+        COMBAT("전투"), ECONOMY("보상"), TIMING("시간·부활"), TURRET("기지·포탑"),
         PRICES("상품 가격"), CONDITIONS("상품 조건");
         private final String title;
         Group(String title) { this.title = title; }
@@ -31,17 +31,28 @@ final class AdminSettings {
         add(entries, Group.COMBAT, "skeletonWave", "스켈레톤 해금 웨이브", 1, 200, 1, 3);
         add(entries, Group.COMBAT, "ashWave", "잿불 추적자 해금 웨이브", 1, 200, 1, 4);
         add(entries, Group.COMBAT, "ironWave", "철갑 수호자 해금 웨이브", 1, 200, 1, 8);
+        add(entries, Group.COMBAT, "frostWave", "서리 감시자 해금 웨이브", 1, 200, 1, 10);
+        add(entries, Group.COMBAT, "siegeWave", "공성 거한 해금 웨이브", 1, 200, 1, 16);
+        add(entries, Group.COMBAT, "dreadWave", "파멸 기사 해금 웨이브", 1, 200, 1, 24);
         add(entries, Group.COMBAT, "skeletonStride", "스켈레톤 배치 간격", 1, 20, 1, 3);
         add(entries, Group.COMBAT, "ashStride", "잿불 추적자 배치 간격", 1, 20, 1, 4);
         add(entries, Group.COMBAT, "ironStride", "철갑 수호자 배치 간격", 1, 20, 1, 7);
+        add(entries, Group.COMBAT, "frostStride", "서리 감시자 배치 간격", 1, 30, 1, 9);
+        add(entries, Group.COMBAT, "siegeStride", "공성 거한 배치 간격", 1, 30, 1, 11);
+        add(entries, Group.COMBAT, "dreadStride", "파멸 기사 배치 간격", 1, 40, 1, 17);
         add(entries, Group.COMBAT, "bossInterval", "보스 웨이브 간격", 1, 50, 1, 5);
+        add(entries, Group.COMBAT, "bossMinionPercent", "보스 웨이브 일반 적 %", 10, 100, 5, 50);
+        add(entries, Group.COMBAT, "bossTierHealth", "보스 단계당 체력 증가 %", 0, 100, 5, 25);
+        add(entries, Group.COMBAT, "bossTierDamage", "보스 단계당 공격 증가 %", 0, 50, 5, 10);
+        add(entries, Group.COMBAT, "waveCountGrowth", "웨이브 적 증가 계수", 0, 10, 1, 2);
+        add(entries, Group.COMBAT, "waveCountGrowthCap", "웨이브 적 증가분 상한", 0, 64, 2, 16);
         add(entries, Group.COMBAT, "healthGrowth", "웨이브 체력 증가 ‰", 0, 500, 5, 85);
         add(entries, Group.COMBAT, "healthCap", "체력 배율 상한 %", 100, 1000, 20, 340);
         add(entries, Group.COMBAT, "damageGrowth", "웨이브 공격 증가 %", 0, 50, 1, 5);
         add(entries, Group.COMBAT, "damageCap", "공격 배율 상한 %", 100, 500, 10, 200);
         add(entries, Group.COMBAT, "bossHealth", "보스 체력 배율 %", 100, 500, 10, 180);
         add(entries, Group.COMBAT, "bossDamage", "보스 공격 배율 %", 100, 500, 10, 130);
-        add(entries, Group.COMBAT, "maxWaveMobs", "웨이브 적 상한", 16, 128, 4, 128);
+        add(entries, Group.COMBAT, "maxWaveMobs", "웨이브 적 상한", 8, 96, 4, 64);
         add(entries, Group.COMBAT, "mobHealthCap", "개체 체력 상한", 20, 2000, 20, 300);
         add(entries, Group.COMBAT, "mobDamageCap", "개체 공격력 상한", 1, 200, 1, 30);
         add(entries, Group.COMBAT, "mobArmorCap", "개체 방어력 상한", 0, 100, 1, 30);
@@ -59,6 +70,7 @@ final class AdminSettings {
         add(entries, Group.ECONOMY, "killEvery", "처치 보상 간격", 1, 50, 1, 4);
         add(entries, Group.ECONOMY, "killBounty", "처치 보상 노드", 0, 100, 1, 8);
         add(entries, Group.ECONOMY, "boss", "보스 보상 노드", 0, 2000, 25, 150);
+        add(entries, Group.ECONOMY, "bossRewardStep", "보스 단계당 보상 증가", 0, 500, 25, 75);
         add(entries, Group.ECONOMY, "earlyBonus", "초반 추가 보상", 0, 1000, 25, 250);
         add(entries, Group.ECONOMY, "earlyBonusMinWave", "추가 보상 최소 종료 웨이브", 1, 30, 1, 2);
         add(entries, Group.ECONOMY, "earlyBonusMaxWave", "추가 보상 최대 종료 웨이브", 1, 30, 1, 5);
@@ -83,19 +95,35 @@ final class AdminSettings {
         add(entries, Group.TURRET, "turretIntervalStep", "단계당 간격 감소 틱", 0, 30, 1, 12);
         add(entries, Group.TURRET, "turretRange", "기본 사거리 블록", 4, 64, 1, 14);
         add(entries, Group.TURRET, "turretRangeStep", "단계당 사거리 증가", 0, 12, 1, 3);
+        add(entries, Group.TURRET, "baseUpgradeBase", "기지 첫 강화 비용", 1, 100000, 25, 600);
+        add(entries, Group.TURRET, "baseUpgradeGrowth", "기지 강화 비용 증가 %", 1, 500, 5, 80);
+        add(entries, Group.TURRET, "coreBaseHp", "중앙 핵심 기본 체력", 20, 1000, 10, 100);
+        add(entries, Group.TURRET, "coreHpStep", "기지 단계당 핵심 체력", 10, 500, 10, 50);
+        add(entries, Group.TURRET, "coreRepairAmount", "핵심 수리 회복량", 10, 500, 10, 40);
+        add(entries, Group.TURRET, "wallRepairCount", "성벽 수리 블록 수", 1, 128, 1, 24);
+        add(entries, Group.TURRET, "wallBreachSeconds", "성벽 파괴 기본 간격 초", 1, 20, 1, 5);
+        add(entries, Group.TURRET, "wallBreakCap", "파괴 주기당 성벽 블록", 1, 8, 1, 2);
+        add(entries, Group.TURRET, "coreNormalDamage", "일반 몹 핵심 피해/초", 0, 20, 1, 1);
+        add(entries, Group.TURRET, "coreSiegeDamage", "공성 몹 핵심 피해/초", 0, 30, 1, 2);
+        add(entries, Group.TURRET, "coreBossDamage", "보스 핵심 피해/초", 0, 50, 1, 4);
+        add(entries, Group.TURRET, "coreDamageCap", "초당 핵심 피해 상한", 1, 100, 1, 12);
 
         for (int id = 0; id < ShopRules.NAMES.length; id++) {
             ShopRules.Product product = ShopRules.product(id);
             if (product == null) continue;
-            if (ShopRules.upgradeSlot(id) < 0 && id != ShopRules.TURRET_UPGRADE_ID) {
+            if (ShopRules.upgradeSlot(id) < 0 && id != ShopRules.TURRET_UPGRADE_ID
+                    && id != ShopRules.BASE_UPGRADE_ID) {
                 Group group = id == ShopRules.TURRET_ID || id == ShopRules.TURRET_REPAIR_ID
+                        || id == ShopRules.CORE_REPAIR_ID || id == ShopRules.WALL_REPAIR_ID
                         ? Group.TURRET : Group.PRICES;
                 add(entries, group, "price:" + id, ShopRules.NAMES[id] + " 가격", 1, 100000000, 25,
                         (int) product.price());
             }
             add(entries, Group.CONDITIONS, "unlock:" + id, ShopRules.NAMES[id] + " 해금 웨이브",
                     0, 200, 1, product.unlockWave());
-            if (ShopRules.upgradeSlot(id) < 0 && id < ShopRules.TURRET_ID)
+            if (ShopRules.upgradeSlot(id) < 0 && (id < ShopRules.TURRET_ID
+                    || id == ShopRules.CORE_REPAIR_ID || id == ShopRules.WALL_REPAIR_ID
+                    || id > ShopRules.WALL_REPAIR_ID))
                 add(entries, Group.CONDITIONS, "cap:" + id, ShopRules.NAMES[id] + " 웨이브 재고",
                         0, 64, 1, product.perWave());
         }

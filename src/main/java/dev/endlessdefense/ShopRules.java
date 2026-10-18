@@ -11,6 +11,7 @@ import java.util.Comparator;
 public final class ShopRules {
     private ShopRules() {}
     public static final int TURRET_ID = 35, TURRET_UPGRADE_ID = 36, TURRET_REPAIR_ID = 37;
+    public static final int BASE_UPGRADE_ID = 38, CORE_REPAIR_ID = 39, WALL_REPAIR_ID = 40;
     public static final int MAX_TURRETS = 4;
     public static final long TURRET_PRICE = 400, TURRET_REPAIR_PRICE = 200;
     public enum Category {
@@ -28,7 +29,11 @@ public final class ShopRules {
             "화살 ×32", "모루", "석재 벽돌 ×64", "흑요석 ×16", "거미줄 ×8", "방패", "토템", "마법 황금 사과",
             "돌 검", "가죽 방어구 꾸러미", "넉백 강화", "눈덩이 ×16", "감속 투척 물약 ×2",
             "끈끈이 피스톤 ×4 + 레드스톤 ×16", "발사기 ×4 + 화살 ×32", "바람 구체 ×4",
-            "자동 사냥 포탑", "포탑 강화", "포탑 수리"
+            "자동 사냥 포탑", "포탑 강화", "포탑 수리",
+            "기지 강화", "중앙 핵심 수리", "성벽 수리",
+            "구운 감자 ×16", "황금 당근 ×8", "꿀병 ×4", "활", "쇠뇌", "분광 화살 ×24",
+            "물 양동이", "엔더 진주 ×2", "철 도끼", "다이아 검", "비계 ×32",
+            "철창 ×32", "TNT ×4", "달콤한 열매 덤불 ×16", "뾰족한 점적석 ×32"
     };
     private static final Product[] PRODUCTS = {
             upgrade("빠른 채굴", "채굴 속도 +20%/단계"), upgrade("추가 체력", "최대 체력 +4/단계"),
@@ -74,7 +79,25 @@ public final class ShopRules {
             supply("포탑 강화", "팀 포탑 중 최저 레벨 1기 강화 · 단계 제한 없음", 0, 1, 0,
                     new ItemStack(Items.CROSSBOW)),
             supply("포탑 수리", "파손된 팀 포탑 1기 재가동 · 아래 상자는 보존", TURRET_REPAIR_PRICE, 1, 0,
-                    new ItemStack(Items.ANVIL))
+                    new ItemStack(Items.ANVIL)),
+            supply("기지 강화", "중앙 핵심 최대 체력 +50 · 성벽 파괴 지연", 0, 1, 0, new ItemStack(Items.BEACON)),
+            supply("중앙 핵심 수리", "핵심 체력 40 회복", 250, 1, 2, new ItemStack(Items.IRON_INGOT)),
+            supply("성벽 수리", "거점 성벽 최대 24블록 복구", 300, 1, 2, new ItemStack(Items.STONE_BRICKS)),
+            supply("구운 감자 ×16", "값싼 식량", 45, 1, 0, new ItemStack(Items.BAKED_POTATO, 16)),
+            supply("황금 당근 ×8", "포만감 높은 식량", 150, 3, 0, new ItemStack(Items.GOLDEN_CARROT, 8)),
+            supply("꿀병 ×4", "독 해제용 음료", 120, 3, 0, new ItemStack(Items.HONEY_BOTTLE, 4)),
+            supply("활", "초반 원거리 무기", 250, 1, 0, new ItemStack(Items.BOW)),
+            supply("쇠뇌", "기지 방어용 원거리 무기", 850, 5, 0, new ItemStack(Items.CROSSBOW)),
+            supply("분광 화살 ×24", "적 식별용 화살", 600, 10, 2, new ItemStack(Items.SPECTRAL_ARROW, 24)),
+            supply("물 양동이", "소화·이동·방어", 180, 1, 0, new ItemStack(Items.WATER_BUCKET)),
+            supply("엔더 진주 ×2", "긴급 탈출", 900, 12, 2, new ItemStack(Items.ENDER_PEARL, 2)),
+            supply("철 도끼", "근접전·벌목", 420, 3, 0, new ItemStack(Items.IRON_AXE)),
+            supply("다이아 검", "후반 무기", 3500, 12, 0, new ItemStack(Items.DIAMOND_SWORD)),
+            supply("비계 ×32", "높은 성벽 보수", 180, 1, 0, new ItemStack(Items.SCAFFOLDING, 32)),
+            supply("철창 ×32", "방어 시설 재료", 250, 3, 0, new ItemStack(Items.IRON_BARS, 32)),
+            supply("TNT ×4", "공성 몹 저지", 950, 10, 2, new ItemStack(Items.TNT, 4)),
+            supply("달콤한 열매 덤불 ×16", "접근 지연 식물", 110, 1, 0, new ItemStack(Items.SWEET_BERRIES, 16)),
+            supply("뾰족한 점적석 ×32", "낙하 함정 재료", 130, 3, 0, new ItemStack(Items.POINTED_DRIPSTONE, 32))
     };
 
     private static Product upgrade(String name, String description) { return new Product(name, description, 0, 1, 0, new ItemStack[0]); }
@@ -94,10 +117,11 @@ public final class ShopRules {
     public static Category category(int id) {
         if (upgradeSlot(id) >= 0 || product(id) == null) return null;
         return switch (id) {
-            case 10, 11, 12, 13, 26 -> Category.FOOD;
-            case 14, 15, 18, 19, 20, 25, 30, 31, 34 -> Category.UTILITY;
-            case 3, 4, 5, 24, 27, 28 -> Category.ARMOR;
-            case 16, 17, 21, 22, 23, 32, 33, TURRET_ID, TURRET_UPGRADE_ID, TURRET_REPAIR_ID -> Category.BUILDING;
+            case 10, 11, 12, 13, 26, 41, 42, 43 -> Category.FOOD;
+            case 14, 15, 18, 19, 20, 25, 30, 31, 34, 46, 47, 48 -> Category.UTILITY;
+            case 3, 4, 5, 24, 27, 28, 44, 45, 49, 50 -> Category.ARMOR;
+            case 16, 17, 21, 22, 23, 32, 33, TURRET_ID, TURRET_UPGRADE_ID, TURRET_REPAIR_ID,
+                    BASE_UPGRADE_ID, CORE_REPAIR_ID, WALL_REPAIR_ID, 51, 52, 53, 54, 55 -> Category.BUILDING;
             default -> null;
         };
     }
@@ -141,7 +165,7 @@ public final class ShopRules {
         return value >= Long.MAX_VALUE ? Long.MAX_VALUE : Math.max(1, (long) Math.ceil(value));
     }
     public static long turretUpgradeCost(int level, int base, int growthPercent) {
-        return level >= 1 ? upgradeCost(level - 1, base, growthPercent) : -1;
+        return level >= 1 && level < Integer.MAX_VALUE ? upgradeCost(level - 1, base, growthPercent) : -1;
     }
     public static float turretDamage(int level, int baseTenths, int stepTenths) {
         return (float) ((baseTenths + Math.max(0L, (long) level - 1) * stepTenths) / 10.0);
@@ -170,11 +194,16 @@ public final class ShopRules {
         return copy;
     }
     public static int enemyCount(int base, int players, int wave) {
-        return enemyCount(base, players, wave, 128);
+        return enemyCount(base, players, wave, 64);
     }
     public static int enemyCount(int base, int players, int wave, int cap) {
+        return enemyCount(base, players, wave, cap, 2, 16);
+    }
+    public static int enemyCount(int base, int players, int wave, int cap, int growthPerRoot, int growthCap) {
         if (players <= 0) return 0;
-        long count = (long) base + (long) (players - 1) * (base + 2L) + 2L * Math.max(0, wave - 1) * players;
+        long growth = Math.min(growthCap, (long) Math.floor(Math.sqrt(Math.max(0, wave - 1))) * growthPerRoot);
+        long count = (long) base + (long) (players - 1) * (base + 2L)
+                + growth * (players + 1L) / 2L;
         return (int) Math.min(cap, count);
     }
     public static long reward(int wave) { return BalanceRules.clearReward(new WaveData(), wave); }

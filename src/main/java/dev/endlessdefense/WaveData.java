@@ -22,7 +22,9 @@ public final class WaveData extends SavedData {
     public boolean gameOver;
     public boolean waveInProgress;
     public boolean defenseMapBuilt;
+    public boolean coreInitialized;
     public int defenseMapX, defenseMapY, defenseMapZ;
+    public int coreTier = 1, coreHp = 100;
     public final int[] turretLevels = new int[ShopRules.MAX_TURRETS];
     public int earlyBonusThroughWave;
     public int respawns, lastGrantWave;
@@ -51,9 +53,12 @@ public final class WaveData extends SavedData {
         d.gameOver = tag.getBoolean("gameOver");
         d.waveInProgress = tag.getBoolean("waveInProgress");
         d.defenseMapBuilt = tag.getBoolean("defenseMapBuilt");
+        d.coreInitialized = tag.getBoolean("coreInitialized");
         d.defenseMapX = tag.getInt("defenseMapX");
         d.defenseMapY = tag.getInt("defenseMapY");
         d.defenseMapZ = tag.getInt("defenseMapZ");
+        d.coreTier = bounded(tag, "coreTier", 1, 1, Integer.MAX_VALUE);
+        d.coreHp = Math.max(0, tag.contains("coreHp") ? tag.getInt("coreHp") : 100);
         for (int i = 0; i < d.turretLevels.length; i++)
             d.turretLevels[i] = Math.max(0, tag.getInt("turretLevel" + i));
         d.earlyBonusThroughWave = Math.max(0, Math.min(30, tag.getInt("earlyBonusThroughWave")));
@@ -137,9 +142,11 @@ public final class WaveData extends SavedData {
         tag.putBoolean("gameOver", gameOver);
         tag.putBoolean("waveInProgress", waveInProgress);
         tag.putBoolean("defenseMapBuilt", defenseMapBuilt);
+        tag.putBoolean("coreInitialized", coreInitialized);
         tag.putInt("defenseMapX", defenseMapX);
         tag.putInt("defenseMapY", defenseMapY);
         tag.putInt("defenseMapZ", defenseMapZ);
+        tag.putInt("coreTier", coreTier); tag.putInt("coreHp", coreHp);
         for (int i = 0; i < turretLevels.length; i++) tag.putInt("turretLevel" + i, turretLevels[i]);
         tag.putInt("earlyBonusThroughWave", earlyBonusThroughWave);
         tag.putInt("economyVersion", 1);
@@ -204,6 +211,9 @@ public final class WaveData extends SavedData {
         pendingRespawn.clear();
         teamMembers.clear();
         Arrays.fill(turretLevels, 0);
+        coreTier = 1;
+        coreHp = 100;
+        coreInitialized = false;
         accounts.clear();
         setDirty();
     }
@@ -215,7 +225,8 @@ public final class WaveData extends SavedData {
     }
     public boolean buy(UUID id, int product) {
         if (product == ShopRules.TURRET_ID || product == ShopRules.TURRET_UPGRADE_ID
-                || product == ShopRules.TURRET_REPAIR_ID) return false;
+                || product == ShopRules.TURRET_REPAIR_ID || product == ShopRules.BASE_UPGRADE_ID
+                || product == ShopRules.CORE_REPAIR_ID || product == ShopRules.WALL_REPAIR_ID) return false;
         ShopRules.Product item = ShopRules.product(product);
         if (item == null || wave < shopUnlock(product) || eliminated.contains(id)) return false;
         Account a = account(id);

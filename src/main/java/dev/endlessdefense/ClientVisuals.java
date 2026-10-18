@@ -40,7 +40,7 @@ public final class ClientVisuals {
             GLFW.GLFW_KEY_K, "key.categories.endlessdefense");
     private static EndlessDefense.StatusPacket status = new EndlessDefense.StatusPacket(
             0, 0, 0, -1, false, 0, 0, 0, "", false, 4, 100, 100, 2, 0, 15,
-            1, false, new int[ShopRules.MAX_TURRETS], 0, 0,
+            1, false, new int[ShopRules.MAX_TURRETS], 0, 0, 0, 0, 0,
             new int[ShopRules.UPGRADE_IDS.length], new int[ShopRules.NAMES.length],
             AdminSettings.defaults(), 0, false, 0, false);
 
@@ -55,6 +55,9 @@ public final class ClientVisuals {
     @SubscribeEvent public static void renderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerEntityRenderer(ModMobs.ASH_RUNNER.get(), AshRenderer::new);
         event.registerEntityRenderer(ModMobs.IRON_BULWARK.get(), BulwarkRenderer::new);
+        event.registerEntityRenderer(ModMobs.FROST_WARDEN.get(), FrostRenderer::new);
+        event.registerEntityRenderer(ModMobs.SIEGE_BRUTE.get(), SiegeRenderer::new);
+        event.registerEntityRenderer(ModMobs.DREAD_KNIGHT.get(), DreadRenderer::new);
     }
 
     @SubscribeEvent public static void overlay(AddGuiOverlayLayersEvent event) {
@@ -78,12 +81,14 @@ public final class ClientVisuals {
                             x, y + 22, 0xAAAAAA, true);
                     graphics.drawString(mc.font, (status.phase() == 1 ? "다음 웨이브 팀 부활 " : "팀 부활 ")
                                     + status.respawns() + "회" + (status.night() ? "  ·  야간 웨이브" : "")
+                                    + (status.defenseWorld() && status.phase() != 0 ? "  ·  핵심 " + status.coreHp() + "/" + status.coreMaxHp() : "")
                                     + (status.surrenderVotes() > 0 ? "  ·  종료 " + status.surrenderVotes() + "/" + status.total() : ""),
                             x, y + 33, 0xFFCCAA, true);
                     graphics.drawString(mc.font, status.phase() == 0 ? "H 메뉴에서 웨이브 포기 투표 가능" : "⚠ H 메뉴: 웨이브 포기 투표",
                             x, y + 44, 0xFF8888, true);
                     if (status.upgrades()[6] >= 1)
-                        graphics.drawString(mc.font, "정찰: 다음 보스 " + (((status.wave() / 5) + 1) * 5) + "웨이브", x, y + 55, 0x99DDFF, true);
+                        graphics.drawString(mc.font, "정찰: 다음 보스 " + (((status.wave() / setting(status, "bossInterval", 5)) + 1)
+                                * setting(status, "bossInterval", 5)) + "웨이브", x, y + 55, 0x99DDFF, true);
                     if (status.upgrades()[6] >= 2)
                         graphics.drawString(mc.font, "빨강 보스 · 보라 주입자 · 금색 수호자 · 하늘색 추적자", x, y + 66, 0x99DDFF, true);
                     if (status.upgrades()[6] >= 3)
@@ -93,6 +98,11 @@ public final class ClientVisuals {
                                         AdminSettings.value(status.adminValues(), "healthCap"))),
                                 x, y + 77, 0x99DDFF, true);
                 });
+    }
+
+    private static int setting(EndlessDefense.StatusPacket state, String key, int fallback) {
+        int value = AdminSettings.value(state.adminValues(), key);
+        return value > 0 ? value : fallback;
     }
 
     @Mod.EventBusSubscriber(modid = EndlessDefense.MODID, value = Dist.CLIENT)
@@ -160,7 +170,8 @@ public final class ClientVisuals {
                     : status.phase() == 1 ? "다음 웨이브 대기 중" : "준비 인원: " + status.ready() + "/" + status.total(), x, y + 14, 0xFFFFFF, true);
             graphics.drawString(font, "보유 노드: " + status.coins(), x, y + 25, 0xFFFFAA, true);
             if (status.defenseWorld()) graphics.drawString(font,
-                    "팀 포탑 " + ShopRules.turretCount(status.turretLevels()) + "/4 · 수리 필요 " + status.brokenTurrets(),
+                    "기지 핵심 " + status.coreHp() + "/" + status.coreMaxHp() + " · 단계 " + status.coreTier()
+                            + " · 포탑 " + ShopRules.turretCount(status.turretLevels()) + "/4",
                     x, y - 12, 0x99DDFF, true);
             graphics.drawString(font, (status.phase() == 1 ? "다음 웨이브 팀 부활: " : "팀 공유 부활: ")
                             + status.respawns() + "회" + (status.night() ? " · 야간" : ""),
@@ -263,6 +274,9 @@ public final class ClientVisuals {
             if (id == ShopRules.TURRET_UPGRADE_ID)
                 return ShopRules.turretUpgradeCost(ShopRules.lowestTurretLevel(status.turretLevels()),
                         setting("turretUpgradeBase"), setting("turretUpgradeGrowth"));
+            if (id == ShopRules.BASE_UPGRADE_ID)
+                return ShopRules.upgradeCost(status.coreTier() - 1,
+                        setting("baseUpgradeBase"), setting("baseUpgradeGrowth"));
             int slot = ShopRules.upgradeSlot(id);
             return slot >= 0 ? ShopRules.upgradeCost(status.upgrades()[slot],
                     setting("upgradeBase"), setting("upgradeGrowth")) : setting("price:" + id);
@@ -384,6 +398,9 @@ public final class ClientVisuals {
                                     + "틱마다 발사";
                         }
                     }
+                    if (id == ShopRules.BASE_UPGRADE_ID)
+                        detail += " · 다음 핵심 최대 체력 " + (setting("coreBaseHp")
+                                + (long) status.coreTier() * setting("coreHpStep"));
                     graphics.renderTooltip(font, Component.literal(ShopRules.NAMES[id] + " · " + detail), mouseX, mouseY);
                     break;
                 }
@@ -397,11 +414,13 @@ public final class ClientVisuals {
             int stock = cap > 0 ? cap - status.stock()[id] : 1;
             boolean unlocked = status.wave() >= setting("unlock:" + id);
             boolean turret = id >= ShopRules.TURRET_ID && id <= ShopRules.TURRET_REPAIR_ID;
+            boolean base = id >= ShopRules.BASE_UPGRADE_ID && id <= ShopRules.WALL_REPAIR_ID;
             boolean available = id == ShopRules.TURRET_ID ? ShopRules.turretCount(status.turretLevels()) < ShopRules.MAX_TURRETS
                     : id == ShopRules.TURRET_UPGRADE_ID ? price >= 0 : id != ShopRules.TURRET_REPAIR_ID || status.brokenTurrets() > 0;
+            if (id == ShopRules.CORE_REPAIR_ID) available = status.coreHp() < status.coreMaxHp();
             button.active = unlocked && price >= 0 && status.coins() >= price && stock > 0
-                    && (!turret || status.defenseWorld() && available);
-            button.setMessage(Component.literal(!unlocked ? "잠김" : turret && !available ? "불가"
+                    && ((!turret && !base) || status.defenseWorld() && available);
+            button.setMessage(Component.literal(!unlocked ? "잠김" : (turret || base) && !available ? "불가"
                     : price < 0 ? "최대" : stock == 0 ? "품절" : "구매"));
         }
 
@@ -418,9 +437,12 @@ public final class ClientVisuals {
             if (upgrade)
                 graphics.drawCenteredString(font, "레벨 " + level,
                         x + cardWidth / 2, y + 33, 0x99DDFF);
-            else if (id == ShopRules.TURRET_ID || id == ShopRules.TURRET_UPGRADE_ID || id == ShopRules.TURRET_REPAIR_ID)
+            else if (id >= ShopRules.TURRET_ID && id <= ShopRules.TURRET_REPAIR_ID)
                 graphics.drawCenteredString(font, "포탑 " + ShopRules.turretCount(status.turretLevels()) + "/4"
                                 + (status.brokenTurrets() > 0 ? " · 파손 " + status.brokenTurrets() : ""),
+                        x + cardWidth / 2, y + 30, 0x99DDFF);
+            else if (id >= ShopRules.BASE_UPGRADE_ID && id <= ShopRules.WALL_REPAIR_ID)
+                graphics.drawCenteredString(font, "핵심 " + status.coreHp() + "/" + status.coreMaxHp(),
                         x + cardWidth / 2, y + 30, 0x99DDFF);
             else if (setting("cap:" + id) > 0)
                 graphics.drawCenteredString(font, "재고 " + Math.max(0, setting("cap:" + id) - status.stock()[id]),
@@ -560,6 +582,24 @@ public final class ClientVisuals {
         private static final ResourceLocation TEXTURE = ResourceLocation.fromNamespaceAndPath(
                 EndlessDefense.MODID, "textures/entity/iron_bulwark.png");
         private BulwarkRenderer(EntityRendererProvider.Context context) { super(context); }
+        @Override public ResourceLocation getTextureLocation(Zombie entity) { return TEXTURE; }
+    }
+
+    private static final class FrostRenderer extends ZombieRenderer {
+        private static final ResourceLocation TEXTURE = ResourceLocation.withDefaultNamespace("textures/entity/zombie/drowned.png");
+        private FrostRenderer(EntityRendererProvider.Context context) { super(context); }
+        @Override public ResourceLocation getTextureLocation(Zombie entity) { return TEXTURE; }
+    }
+
+    private static final class SiegeRenderer extends ZombieRenderer {
+        private static final ResourceLocation TEXTURE = ResourceLocation.withDefaultNamespace("textures/entity/zombie/husk.png");
+        private SiegeRenderer(EntityRendererProvider.Context context) { super(context); }
+        @Override public ResourceLocation getTextureLocation(Zombie entity) { return TEXTURE; }
+    }
+
+    private static final class DreadRenderer extends ZombieRenderer {
+        private static final ResourceLocation TEXTURE = ResourceLocation.withDefaultNamespace("textures/entity/zombie/zombie.png");
+        private DreadRenderer(EntityRendererProvider.Context context) { super(context); }
         @Override public ResourceLocation getTextureLocation(Zombie entity) { return TEXTURE; }
     }
 }

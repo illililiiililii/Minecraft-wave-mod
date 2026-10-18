@@ -35,6 +35,7 @@ import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.ArmorItem;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.Enchantment;
@@ -51,6 +52,7 @@ import net.minecraftforge.event.entity.living.LivingDropsEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.level.BlockEvent;
 import net.minecraftforge.event.network.CustomPayloadEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -71,7 +73,7 @@ public final class EndlessDefense {
     public static final String MODID = "endlessdefense";
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final SimpleChannel CHANNEL = ChannelBuilder.named(ResourceLocation.fromNamespaceAndPath(MODID, "main"))
-            .networkProtocolVersion(7).simpleChannel();
+            .networkProtocolVersion(8).simpleChannel();
     private static final Map<MinecraftServer, Session> SESSIONS = new WeakHashMap<>();
 
     public EndlessDefense(FMLJavaModLoadingContext context) {
@@ -102,6 +104,9 @@ public final class EndlessDefense {
                     buffer.writeBoolean(message.defenseWorld);
                     for (int level : message.turretLevels) buffer.writeVarInt(level);
                     buffer.writeVarInt(message.brokenTurrets);
+                    buffer.writeVarInt(message.coreHp);
+                    buffer.writeVarInt(message.coreMaxHp);
+                    buffer.writeVarInt(message.coreTier);
                     buffer.writeVarLong(message.coins);
                     for (int level : message.upgrades) buffer.writeVarInt(level);
                     for (int count : message.stock) buffer.writeVarInt(count);
@@ -115,7 +120,8 @@ public final class EndlessDefense {
                         buffer.readBoolean(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(), buffer.readUtf(2048),
                         buffer.readBoolean(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(),
                         buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(),
-                        buffer.readBoolean(), readTurrets(buffer), buffer.readVarInt(), buffer.readVarLong(),
+                        buffer.readBoolean(), readTurrets(buffer), buffer.readVarInt(), buffer.readVarInt(),
+                        buffer.readVarInt(), buffer.readVarInt(), buffer.readVarLong(),
                         readUpgrades(buffer),
                         readStock(buffer), readAdminValues(buffer), buffer.readVarInt(), buffer.readBoolean(),
                         buffer.readVarInt(), buffer.readBoolean()))
@@ -192,6 +198,13 @@ public final class EndlessDefense {
                 sync(player.server);
                 return;
             }
+            if (message.product == ShopRules.BASE_UPGRADE_ID || message.product == ShopRules.CORE_REPAIR_ID
+                    || message.product == ShopRules.WALL_REPAIR_ID) {
+                player.sendSystemMessage(Component.literal("[Endless Defense] "
+                        + BaseSystem.purchase(player, data, message.product)));
+                sync(player.server);
+                return;
+            }
             if (!data.buy(player.getUUID(), message.product)) {
                 player.sendSystemMessage(Component.literal("[Endless Defense] 노드가 부족하거나 해금·재고·레벨 조건을 충족하지 못했습니다."));
                 sync(player.server);
@@ -221,7 +234,8 @@ public final class EndlessDefense {
     public record StatusPacket(int wave, int highest, int phase, int countdown, boolean selfReady, int ready, int total,
                                int remaining, String roster, boolean canConfigure, int baseMobs, int healthPercent,
                                int damagePercent, int awareness, int armorBonus, int gearChance, int infuserChance,
-                               boolean defenseWorld, int[] turretLevels, int brokenTurrets, long coins, int[] upgrades,
+                               boolean defenseWorld, int[] turretLevels, int brokenTurrets,
+                               int coreHp, int coreMaxHp, int coreTier, long coins, int[] upgrades,
                                int[] stock, int[] adminValues, int respawns, boolean night, int surrenderVotes, boolean selfSurrender) {
         public StatusPacket {
             turretLevels = java.util.Arrays.copyOf(turretLevels, ShopRules.MAX_TURRETS);
@@ -293,6 +307,9 @@ public final class EndlessDefense {
                     data.awareness, data.armorBonus, data.gearChance, data.infuserChancePercent,
                     DefenseMap.selected(server.overworld()), data.turretLevels.clone(),
                     TurretSystem.brokenCount(server.overworld(), data),
+                    DefenseMap.selected(server.overworld()) ? data.coreHp : 0,
+                    DefenseMap.selected(server.overworld()) ? BaseSystem.maxHp(data) : 0,
+                    DefenseMap.selected(server.overworld()) ? data.coreTier : 0,
                     account.coins, account.levels.clone(),
                     account.stockWave == data.wave ? account.stock.clone() : new int[ShopRules.NAMES.length],
                     AdminSettings.values(data),
@@ -305,6 +322,7 @@ public final class EndlessDefense {
         if (game.phase != Phase.LOBBY || !allReady(server, game)) return;
         DefenseMap.ensure(server);
         WaveData data = WaveData.get(server);
+        BaseSystem.beginRun(server, data);
         data.started = true;
         int bonusMin = data.number("earlyBonusMinWave", 2);
         int bonusMax = Math.max(bonusMin, data.number("earlyBonusMaxWave", 5));
@@ -316,7 +334,8 @@ public final class EndlessDefense {
         for (ServerPlayer player : server.getPlayerList().getPlayers()) data.teamMembers.add(player.getUUID());
         data.setDirty();
         game.ready.clear();
-        BlockPos spawn = server.overworld().getSharedSpawnPos();
+        BlockPos spawn = DefenseMap.selected(server.overworld()) && data.defenseMapBuilt
+                ? DefenseMap.core(data).offset(4, -1, 0) : server.overworld().getSharedSpawnPos();
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             player.getInventory().clearContent();
             player.getEnderChestInventory().clearContent();
@@ -383,6 +402,10 @@ public final class EndlessDefense {
     }
 
     private static void gameOver(MinecraftServer server, Session game) {
+        gameOver(server, game, "팀 부활 횟수를 모두 사용했습니다");
+    }
+
+    private static void gameOver(MinecraftServer server, Session game, String reason) {
         if (game.phase == Phase.GAME_OVER) return;
         for (UUID id : game.mobs) {
             Entity mob = findEntity(server, id);
@@ -395,8 +418,8 @@ public final class EndlessDefense {
         data.gameOver = true;
         data.waveInProgress = false;
         data.setDirty();
-        announce(server, "팀 전멸! 게임이 멈췄습니다. H 화면의 종료 투표 또는 OP /endlessdefense stop으로 새 게임을 준비할 수 있습니다.");
-        title(server, "게임 오버", "팀 부활 횟수를 모두 사용했습니다", 10, 80, 20);
+        announce(server, reason + " · 게임이 멈췄습니다. H 화면의 종료 투표 또는 OP /endlessdefense stop으로 새 게임을 준비할 수 있습니다.");
+        title(server, "게임 오버", reason, 10, 80, 20);
         cue(server, SoundEvents.WITHER_DEATH, 0.8f, 0.8f);
         sync(server);
     }
@@ -429,15 +452,28 @@ public final class EndlessDefense {
         game.retrying = false;
         data.highestWave = Math.max(data.highestWave, data.wave);
         data.setDirty();
-        boolean bossWave = data.wave % data.number("bossInterval", 5) == 0;
+        int bossInterval = data.number("bossInterval", 5);
+        boolean bossWave = data.wave % bossInterval == 0;
+        int bossTier = bossWave ? Math.max(1, data.wave / bossInterval) : 0;
+        game.bossTier = bossTier;
+        EntityType<? extends Monster> bossType = bossWave ? bossType(bossTier) : null;
+        String bossName = bossWave ? switch (Math.min(bossTier, 5)) {
+            case 1 -> "잿불 선봉장";
+            case 2 -> "철갑 수호자";
+            case 3 -> "서리 감시자";
+            case 4 -> "공성 거한";
+            default -> "파멸 기사";
+        } : "";
         game.night = isNight(server.overworld());
         int total = BalanceRules.nightCount(data,
                 ShopRules.enemyCount(data.baseMobs, players.size(), data.wave,
-                        data.number("maxWaveMobs", 128)), game.night);
-        int count = bossWave ? total - 1 : total;
+                        data.number("maxWaveMobs", 64), data.number("waveCountGrowth", 2),
+                        data.number("waveCountGrowthCap", 16)), game.night);
+        int count = bossWave ? Math.max(2, (total - 1) * data.number("bossMinionPercent", 50) / 100) : total;
+        total = count + (bossWave ? 1 : 0);
         announce(server, data.wave + "웨이브 시작! " + (game.night ? "야간 추가 적! " : "")
-                + (bossWave ? "철갑 수호자 출현! " : "") + "예정 적: " + total + " / 팀 부활 " + data.respawns);
-        title(server, data.wave + "웨이브 시작!", bossWave ? "철갑 수호자 출현" : "적을 모두 처치하세요", 10, 50, 10);
+                + (bossWave ? bossName + " 보스 출현! " : "") + "예정 적: " + total + " / 팀 부활 " + data.respawns);
+        title(server, data.wave + "웨이브 시작!", bossWave ? bossName + " 보스 출현" : "적을 모두 처치하세요", 10, 50, 10);
         cue(server, SoundEvents.RAID_HORN.value(), 1.0f, bossWave ? 0.7f : 1.0f);
         game.kills.clear();
         game.bossMobs.clear();
@@ -449,7 +485,10 @@ public final class EndlessDefense {
             boolean boss = bossWave && i == count;
             ServerPlayer target = players.get(i % players.size());
             ServerLevel level = target.serverLevel();
-            EntityType<? extends Monster> type = boss ? ModMobs.IRON_BULWARK.get()
+            EntityType<? extends Monster> type = boss ? bossType
+                    : data.wave >= data.number("dreadWave", 24) && i % data.number("dreadStride", 17) == 0 ? ModMobs.DREAD_KNIGHT.get()
+                    : data.wave >= data.number("siegeWave", 16) && i % data.number("siegeStride", 11) == 0 ? ModMobs.SIEGE_BRUTE.get()
+                    : data.wave >= data.number("frostWave", 10) && i % data.number("frostStride", 9) == 0 ? ModMobs.FROST_WARDEN.get()
                     : data.wave >= data.number("ironWave", 8) && i % data.number("ironStride", 7) == 0 ? ModMobs.IRON_BULWARK.get()
                     : data.wave >= data.number("ashWave", 4) && i % data.number("ashStride", 4) == 0 ? ModMobs.ASH_RUNNER.get()
                     : data.wave >= data.number("skeletonWave", 3) && i % data.number("skeletonStride", 3) == 0
@@ -464,14 +503,14 @@ public final class EndlessDefense {
             if (mob == null) { game.escaped = true; continue; }
             mob.moveTo(top.getX() + 0.5, top.getY(), top.getZ() + 0.5, level.random.nextFloat() * 360f, 0);
             mob.setPersistenceRequired();
-            applyDifficulty(mob, data, boss, level);
+            applyDifficulty(mob, data, boss ? bossTier : 0, level);
             mob.addTag("endlessdefense_wave");
             if (boss) mob.addTag("endlessdefense_boss");
             boolean infuser = !boss && level.random.nextInt(100) < data.infuserChancePercent;
             if (infuser) mob.addTag("endlessdefense_infuser");
             mob.setGlowingTag(true);
             if (boss) {
-                mob.setCustomName(Component.literal("철갑 수호자 · " + data.wave + "웨이브"));
+                mob.setCustomName(Component.literal(bossName + " · " + data.wave + "웨이브 보스"));
             } else if (infuser) mob.setCustomName(Component.literal("마력 주입자 · " + mob.getType().getDescription().getString()));
             else mob.setCustomName(mob.getType().getDescription());
             mob.setCustomNameVisible(true);
@@ -504,6 +543,16 @@ public final class EndlessDefense {
         data.setDirty();
         announce(server, reason + ": 보상 없이 같은 웨이브를 다시 준비합니다.");
         scheduleWave(server, game);
+    }
+
+    private static EntityType<? extends Monster> bossType(int tier) {
+        return switch (Math.min(tier, 5)) {
+            case 1 -> ModMobs.ASH_RUNNER.get();
+            case 2 -> ModMobs.IRON_BULWARK.get();
+            case 3 -> ModMobs.FROST_WARDEN.get();
+            case 4 -> ModMobs.SIEGE_BRUTE.get();
+            default -> ModMobs.DREAD_KNIGHT.get();
+        };
     }
 
     private static boolean isNight(ServerLevel level) {
@@ -594,16 +643,19 @@ public final class EndlessDefense {
         }
     }
 
-    private static void applyDifficulty(Monster mob, WaveData data, boolean boss, ServerLevel level) {
+    private static void applyDifficulty(Monster mob, WaveData data, int bossTier, ServerLevel level) {
+        boolean boss = bossTier > 0;
+        double bossHealthScale = boss ? 1.0 + (bossTier - 1L) * data.number("bossTierHealth", 25) / 100.0 : 1.0;
+        double bossDamageScale = boss ? 1.0 + (bossTier - 1L) * data.number("bossTierDamage", 10) / 100.0 : 1.0;
         double waveHealth = BalanceRules.healthMultiplier(data, data.wave);
         double waveDamage = Math.min(1.0 + (data.wave - 1) * data.number("damageGrowth", 5) / 100.0,
                 data.number("damageCap", 200) / 100.0);
-        setAttribute(mob, Attributes.MAX_HEALTH, Math.min(data.number("mobHealthCap", 300),
+        setAttribute(mob, Attributes.MAX_HEALTH, Math.min(data.number("mobHealthCap", 300) * bossHealthScale,
                 mob.getAttributeBaseValue(Attributes.MAX_HEALTH) * data.healthPercent / 100.0
-                        * waveHealth * (boss ? data.number("bossHealth", 180) / 100.0 : 1)));
-        setAttribute(mob, Attributes.ATTACK_DAMAGE, Math.min(data.number("mobDamageCap", 30),
+                        * waveHealth * (boss ? data.number("bossHealth", 180) / 100.0 * bossHealthScale : 1)));
+        setAttribute(mob, Attributes.ATTACK_DAMAGE, Math.min(data.number("mobDamageCap", 30) * bossDamageScale,
                 mob.getAttributeBaseValue(Attributes.ATTACK_DAMAGE) * data.damagePercent / 100.0
-                        * waveDamage * (boss ? data.number("bossDamage", 130) / 100.0 : 1)));
+                        * waveDamage * (boss ? data.number("bossDamage", 130) / 100.0 * bossDamageScale : 1)));
         setAttribute(mob, Attributes.ARMOR, Math.min(data.number("mobArmorCap", 30), mob.getAttributeBaseValue(Attributes.ARMOR)
                 + data.armorBonus + Math.min(data.wave / data.number("armorWaveStep", 5),
                         data.number("armorWaveCap", 6))));
@@ -613,13 +665,17 @@ public final class EndlessDefense {
         mob.setHealth(mob.getMaxHealth());
         if (mob instanceof Skeleton) mob.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.BOW));
         else if (boss || level.random.nextInt(100) < data.gearChance)
-            mob.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(boss ? Items.IRON_AXE : Items.STONE_SWORD));
+            mob.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(bossTier >= 5 ? Items.NETHERITE_AXE
+                    : bossTier >= 2 ? Items.IRON_AXE : Items.STONE_SWORD));
         // A helmet keeps vanilla zombie/skeleton wave units from clearing themselves in daylight.
         boolean upgradedHelmet = boss || level.random.nextInt(100) < data.gearChance;
-        mob.setItemSlot(EquipmentSlot.HEAD, new ItemStack(upgradedHelmet ? Items.IRON_HELMET : Items.LEATHER_HELMET));
+        mob.setItemSlot(EquipmentSlot.HEAD, new ItemStack(bossTier >= 5 ? Items.NETHERITE_HELMET
+                : bossTier == 1 ? Items.LEATHER_HELMET
+                : upgradedHelmet ? Items.IRON_HELMET : Items.LEATHER_HELMET));
         mob.setDropChance(EquipmentSlot.HEAD, 0.0f);
         if (boss || level.random.nextInt(100) < data.gearChance)
-            mob.setItemSlot(EquipmentSlot.CHEST, new ItemStack(boss ? Items.IRON_CHESTPLATE : Items.LEATHER_CHESTPLATE));
+            mob.setItemSlot(EquipmentSlot.CHEST, new ItemStack(bossTier >= 5 ? Items.NETHERITE_CHESTPLATE
+                    : bossTier >= 2 ? Items.IRON_CHESTPLATE : Items.LEATHER_CHESTPLATE));
     }
 
     private static void setAttribute(Mob mob, net.minecraft.core.Holder<net.minecraft.world.entity.ai.attributes.Attribute> attribute, double value) {
@@ -635,7 +691,10 @@ public final class EndlessDefense {
         long reward = BalanceRules.clearReward(data, wave);
         for (ServerPlayer player : participants(server, data)) data.award(player.getUUID(), reward);
         for (var entry : game.kills.entrySet()) data.award(entry.getKey(), (entry.getValue() / data.killRewardEvery) * (long) data.killBounty);
-        if (game.bossKilled) for (ServerPlayer player : participants(server, data)) data.award(player.getUUID(), data.bossReward);
+        long bossReward = game.bossKilled ? data.bossReward
+                + Math.max(0L, (long) game.bossTier - 1)
+                * data.number("bossRewardStep", 75) : 0;
+        if (game.bossKilled) for (ServerPlayer player : participants(server, data)) data.award(player.getUUID(), bossReward);
         for (var entry : game.infusions.entrySet()) {
             WaveData.Account account = data.account(entry.getKey());
             account.pendingInfusions = Math.min(32, account.pendingInfusions + entry.getValue());
@@ -662,7 +721,7 @@ public final class EndlessDefense {
         data.waveInProgress = false;
         data.setDirty();
         announce(server, wave + "웨이브 클리어! 기본 +" + reward + " 노드"
-                + (game.bossKilled ? ", 보스 +" + data.bossReward : "") + " · 체력 회복. 다음 웨이브는 자동 시작됩니다.");
+                + (game.bossKilled ? ", 보스 +" + bossReward : "") + " · 체력 회복. 다음 웨이브는 자동 시작됩니다.");
         title(server, wave + "웨이브 클리어!", "체력 회복 · 기본 +" + reward + " 노드", 10, 50, 10);
         cue(server, SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, 0.9f, 1.0f);
         scheduleWave(server, game);
@@ -698,10 +757,13 @@ public final class EndlessDefense {
     private static void applyPendingInfusions(ServerPlayer player, WaveData data) {
         WaveData.Account account = data.account(player.getUUID());
         if (account.pendingInfusions <= 0) return;
-        ItemStack weapon = player.getMainHandItem();
-        if (!(weapon.is(ItemTags.WEAPON_ENCHANTABLE) || weapon.is(ItemTags.BOW_ENCHANTABLE)
-                || weapon.is(ItemTags.CROSSBOW_ENCHANTABLE) || weapon.is(ItemTags.TRIDENT_ENCHANTABLE)
-                || weapon.is(ItemTags.MACE_ENCHANTABLE))) return;
+        java.util.List<ItemStack> equipment = new java.util.ArrayList<>();
+        equipment.add(player.getMainHandItem());
+        equipment.add(player.getOffhandItem());
+        for (ItemStack armor : player.getArmorSlots()) equipment.add(armor);
+        equipment.removeIf(stack -> infusionOptions(stack, player.registryAccess()).isEmpty());
+        if (equipment.isEmpty()) return;
+        ItemStack weapon = equipment.get(player.getRandom().nextInt(equipment.size()));
         var choices = infusionOptions(weapon, player.registryAccess());
         if (choices.isEmpty()) return;
         var chosen = choices.get(player.getRandom().nextInt(choices.size()));
@@ -711,13 +773,13 @@ public final class EndlessDefense {
         weapon.enchant(chosen, level);
         account.pendingInfusions--;
         data.setDirty();
-        player.sendSystemMessage(Component.literal("무기에 " + chosen.value().description().getString()
+        player.sendSystemMessage(Component.literal(weapon.getHoverName().getString() + "에 " + chosen.value().description().getString()
                 + " " + level + " 인챈트가 적용됐습니다. 남은 마력 주입 " + account.pendingInfusions + "회"));
         player.playNotifySound(SoundEvents.ENCHANTMENT_TABLE_USE, SoundSource.PLAYERS, 0.8f, 1.0f);
     }
 
     static java.util.List<Holder.Reference<Enchantment>> infusionOptions(ItemStack weapon, RegistryAccess registries) {
-        if (!(weapon.is(ItemTags.WEAPON_ENCHANTABLE) || weapon.is(ItemTags.BOW_ENCHANTABLE)
+        if (!(weapon.getItem() instanceof ArmorItem || weapon.is(ItemTags.WEAPON_ENCHANTABLE) || weapon.is(ItemTags.BOW_ENCHANTABLE)
                 || weapon.is(ItemTags.CROSSBOW_ENCHANTABLE) || weapon.is(ItemTags.TRIDENT_ENCHANTABLE)
                 || weapon.is(ItemTags.MACE_ENCHANTABLE))) return java.util.List.of();
         var existing = EnchantmentHelper.getEnchantmentsForCrafting(weapon);
@@ -836,6 +898,13 @@ public final class EndlessDefense {
         TurretSystem.collectDrops(event);
     }
 
+    @SubscribeEvent public void onBlockBreak(BlockEvent.BreakEvent event) {
+        if (!(event.getLevel() instanceof ServerLevel level) || level != level.getServer().overworld()) return;
+        WaveData data = WaveData.get(level.getServer());
+        if (data.started && !data.gameOver && DefenseMap.selected(level) && data.defenseMapBuilt
+                && event.getPos().equals(DefenseMap.core(data))) event.setCanceled(true);
+    }
+
     @SubscribeEvent public void onHurt(LivingHurtEvent event) {
         if (!(event.getSource().getEntity() instanceof ServerPlayer player)
                 || !event.getEntity().getTags().contains("endlessdefense_wave")) return;
@@ -865,7 +934,9 @@ public final class EndlessDefense {
             if (!game.spawning && !game.mobs.contains(mob.getUUID())) { mob.discard(); return; }
         }
         boolean waveOrCustom = mob.getTags().contains("endlessdefense_wave")
-                || mob.getType() == ModMobs.ASH_RUNNER.get() || mob.getType() == ModMobs.IRON_BULWARK.get();
+                || mob.getType() == ModMobs.ASH_RUNNER.get() || mob.getType() == ModMobs.IRON_BULWARK.get()
+                || mob.getType() == ModMobs.FROST_WARDEN.get() || mob.getType() == ModMobs.SIEGE_BRUTE.get()
+                || mob.getType() == ModMobs.DREAD_KNIGHT.get();
         if (mob.getTags().contains("endlessdefense_wave")) {
             if (mob.getCustomName() == null) mob.setCustomName(mob.getType().getDescription());
             mob.setCustomNameVisible(true);
@@ -880,12 +951,18 @@ public final class EndlessDefense {
                 : wave && mob.getTags().contains("endlessdefense_infuser") ? "ed_wave_infuser"
                 : mob.getType() == ModMobs.IRON_BULWARK.get() ? wave ? "ed_wave_bulwark" : "ed_bulwark"
                 : mob.getType() == ModMobs.ASH_RUNNER.get() ? wave ? "ed_wave_runner" : "ed_runner"
+                : mob.getType() == ModMobs.FROST_WARDEN.get() ? wave ? "ed_wave_frost" : "ed_frost"
+                : mob.getType() == ModMobs.SIEGE_BRUTE.get() ? wave ? "ed_wave_siege" : "ed_siege"
+                : mob.getType() == ModMobs.DREAD_KNIGHT.get() ? wave ? "ed_wave_dread" : "ed_dread"
                 : mob instanceof Skeleton ? "ed_wave_skeleton" : "ed_wave_zombie";
         ChatFormatting color = switch (name) {
             case "ed_wave_boss" -> ChatFormatting.RED;
             case "ed_wave_infuser" -> ChatFormatting.LIGHT_PURPLE;
             case "ed_wave_bulwark", "ed_bulwark" -> ChatFormatting.GOLD;
             case "ed_wave_runner", "ed_runner" -> ChatFormatting.AQUA;
+            case "ed_wave_frost", "ed_frost" -> ChatFormatting.BLUE;
+            case "ed_wave_siege", "ed_siege" -> ChatFormatting.DARK_RED;
+            case "ed_wave_dread", "ed_dread" -> ChatFormatting.DARK_PURPLE;
             case "ed_wave_skeleton" -> ChatFormatting.YELLOW;
             default -> ChatFormatting.WHITE;
         };
@@ -909,6 +986,7 @@ public final class EndlessDefense {
         if (game.phase == Phase.ACTIVE) TurretSystem.tick(server, WaveData.get(server), game.mobs);
         if (server.getTickCount() % 20 != 0) return;
         DefenseMap.ensure(server);
+        BaseSystem.ensureLegacy(server, WaveData.get(server));
         for (ServerPlayer player : server.getPlayerList().getPlayers())
             applyPendingInfusions(player, WaveData.get(server));
         if (server.getTickCount() % 200 == 0)
@@ -922,6 +1000,15 @@ public final class EndlessDefense {
                     if (mob.getTeam() == null || !mob.getTeam().getName().startsWith("ed_wave_")) assignGlow(mob);
                 }
             }
+        WaveData data = WaveData.get(server);
+        if ((game.phase == Phase.ACTIVE || game.phase == Phase.WAITING)
+                && DefenseMap.selected(server.overworld()) && data.defenseMapBuilt) {
+            if (game.phase == Phase.ACTIVE ? BaseSystem.tick(server, data, game.mobs)
+                    : !server.overworld().getBlockState(DefenseMap.core(data)).is(Blocks.BEACON)) {
+                gameOver(server, game, "중앙 핵심이 파괴되었습니다");
+                return;
+            }
+        }
         if (game.phase == Phase.LOBBY) {
             if (allReady(server, game)) startRun(server, game);
             else sync(server);
@@ -1103,6 +1190,7 @@ public final class EndlessDefense {
         boolean escaped;
         boolean spawning;
         boolean bossKilled;
+        int bossTier;
         boolean retrying;
         final Set<UUID> ready = new HashSet<>();
         final Set<UUID> surrenderVotes = new HashSet<>();

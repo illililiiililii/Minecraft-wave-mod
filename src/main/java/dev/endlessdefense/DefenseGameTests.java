@@ -53,9 +53,9 @@ public final class DefenseGameTests {
         BlockPos origin = helper.absolutePos(new BlockPos(128, 1, 0));
         int x = origin.getX(), y = 64, z = origin.getZ();
         DefenseMap.build(level, x, y, z);
-        if (!level.getBlockState(new BlockPos(x, y - 1, z)).is(Blocks.GLOWSTONE)
-                || !level.getBlockState(new BlockPos(x, y, z)).isAir())
-            throw new AssertionError("Defense courtyard floor or clearing missing");
+        if (!level.getBlockState(new BlockPos(x, y - 1, z)).is(Blocks.IRON_BLOCK)
+                || !level.getBlockState(new BlockPos(x, y, z)).is(Blocks.BEACON))
+            throw new AssertionError("Defense objective or beacon foundation missing");
         for (int side : new int[] {-18, 18}) {
             if (!level.getBlockState(new BlockPos(x + side, y, z)).isAir()
                     || !level.getBlockState(new BlockPos(x, y, z + side)).isAir()
@@ -149,7 +149,7 @@ public final class DefenseGameTests {
         if (ShopRules.enemyCount(4, 1, 1) != 4 || ShopRules.enemyCount(4, 2, 1) != 10
                 || ShopRules.enemyCount(4, 4, 1) != 22)
             throw new AssertionError("Player count scaling incorrect");
-        if (ShopRules.enemyCount(4, 2, 2) != 14 || ShopRules.enemyCount(4, 8, 1000) != 128)
+        if (ShopRules.enemyCount(4, 2, 2) != 13 || ShopRules.enemyCount(4, 8, 1000) != 64)
             throw new AssertionError("Wave scaling or cap incorrect");
         WaveData balance = new WaveData();
         if (ShopRules.reward(1) != 100 || ShopRules.reward(2) != 130 || ShopRules.reward(5) != 220
@@ -164,7 +164,7 @@ public final class DefenseGameTests {
                 || BalanceRules.clearReward(balance, 3) != 410 || BalanceRules.clearReward(balance, 4) != 190)
             throw new AssertionError("Random-duration opening rewards are not limited to selected rounds");
         if (BalanceRules.nightCount(balance, 10, true) != 12 || BalanceRules.nightCount(balance, 10, false) != 10
-                || BalanceRules.nightCount(balance, 128, true) != 128)
+                || BalanceRules.nightCount(balance, 128, true) != 64)
             throw new AssertionError("Night bonus incorrect");
         if (BalanceRules.initialTickets(balance, 1) != 4 || BalanceRules.initialTickets(balance, 2) != 4
                 || BalanceRules.initialTickets(balance, 4) != 5 || BalanceRules.ticketCap(balance, 30, 4) != 1

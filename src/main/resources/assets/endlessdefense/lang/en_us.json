@@ -1,6 +1,9 @@
 {
   "entity.endlessdefense.ash_runner": "Ash Runner",
   "entity.endlessdefense.iron_bulwark": "Iron Bulwark",
+  "entity.endlessdefense.frost_warden": "Frost Warden",
+  "entity.endlessdefense.siege_brute": "Siege Brute",
+  "entity.endlessdefense.dread_knight": "Dread Knight",
   "key.endlessdefense.ready": "Ready / Cancel",
   "key.endlessdefense.panel": "Open Progress Panel",
   "key.endlessdefense.shop": "Open Shop",

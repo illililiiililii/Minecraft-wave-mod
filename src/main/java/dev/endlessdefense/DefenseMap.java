@@ -41,7 +41,7 @@ final class DefenseMap {
         data.defenseMapZ = surface.getZ();
         data.defenseMapBuilt = true;
         data.setDirty();
-        level.setDefaultSpawnPos(new BlockPos(surface.getX(), y - 1, surface.getZ()), 0);
+        level.setDefaultSpawnPos(new BlockPos(surface.getX() + 4, y - 1, surface.getZ()), 0);
         LOGGER.info("Defense Survival courtyard created at {}, {}, {}", surface.getX(), y, surface.getZ());
     }
 
@@ -97,6 +97,35 @@ final class DefenseMap {
             place(level, cx + dx, y + 3, cz + dz, Blocks.LANTERN);
         }
         for (int side = 0; side < 4; side++) buildApproach(level, cx, y, cz, side);
+        placeCore(level, new BlockPos(cx, y, cz));
+    }
+
+    static BlockPos core(WaveData data) {
+        return new BlockPos(data.defenseMapX, data.defenseMapY, data.defenseMapZ);
+    }
+
+    static void placeCore(ServerLevel level, BlockPos core) {
+        for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++)
+            place(level, core.getX() + dx, core.getY() - 1, core.getZ() + dz, Blocks.IRON_BLOCK);
+        place(level, core.getX(), core.getY(), core.getZ(), Blocks.BEACON);
+    }
+
+    static int repairWalls(ServerLevel level, WaveData data, int limit) {
+        int repaired = 0, cx = data.defenseMapX, cy = data.defenseMapY, cz = data.defenseMapZ;
+        for (int d = -18; d <= 18 && repaired < limit; d++) {
+            if (Math.abs(d) <= 2) continue;
+            for (int h = 0; h <= 2 && repaired < limit; h++) {
+                BlockPos[] positions = {new BlockPos(cx + d, cy + h, cz - 18),
+                        new BlockPos(cx + d, cy + h, cz + 18),
+                        new BlockPos(cx - 18, cy + h, cz + d),
+                        new BlockPos(cx + 18, cy + h, cz + d)};
+                for (BlockPos pos : positions) {
+                    if (repaired >= limit) break;
+                    if (level.getBlockState(pos).isAir() && level.setBlock(pos, Blocks.STONE_BRICKS.defaultBlockState(), 3)) repaired++;
+                }
+            }
+        }
+        return repaired;
     }
 
     private static void buildApproach(ServerLevel level, int cx, int y, int cz, int side) {

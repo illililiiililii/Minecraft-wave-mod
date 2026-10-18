@@ -1,6 +1,9 @@
 {
   "entity.endlessdefense.ash_runner": "잿불 추적자",
   "entity.endlessdefense.iron_bulwark": "철갑 수호자",
+  "entity.endlessdefense.frost_warden": "서리 감시자",
+  "entity.endlessdefense.siege_brute": "공성 거한",
+  "entity.endlessdefense.dread_knight": "파멸 기사",
   "key.endlessdefense.ready": "준비/취소",
   "key.endlessdefense.panel": "진행 상황 화면",
   "key.endlessdefense.shop": "상점 열기",
