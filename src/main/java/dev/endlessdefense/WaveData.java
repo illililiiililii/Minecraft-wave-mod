@@ -21,6 +21,9 @@ public final class WaveData extends SavedData {
     public boolean started;
     public boolean gameOver;
     public boolean waveInProgress;
+    public boolean defenseMapBuilt;
+    public int defenseMapX, defenseMapY, defenseMapZ;
+    public int earlyBonusThroughWave;
     public int respawns, lastGrantWave;
     public final Set<UUID> eliminated = new HashSet<>(), pendingRespawn = new HashSet<>();
     public final Set<UUID> restoreSurvival = new HashSet<>();
@@ -29,7 +32,8 @@ public final class WaveData extends SavedData {
     public int baseMobs = 4, healthPercent = 100, damagePercent = 100, awareness = 2, armorBonus = 0, gearChance = 15;
     public int earlyReward = 100, earlyRewardStep = 30, midRewardStep = 60, lateRewardStep = 90;
     public int killRewardEvery = 4, killBounty = 8, bossReward = 150;
-    public int restMinStep = 2, restMaxStep = 3, restMaxCap = 100, enchantDropPercent = 10;
+    public int restMinStep = 2, restMaxStep = 3, restMaxCap = 180;
+    public int earlyBonusAmount = 250, infuserChancePercent = 1;
     public int nightPercent = 15, nightCap = 16;
     public int respawnEarlyCap = 8, respawnLateWave = 30, respawnGrantInterval = 5;
 
@@ -44,6 +48,11 @@ public final class WaveData extends SavedData {
         d.started = tag.getBoolean("started") || d.wave > 0; // 0.2/0.3 worlds must not wipe inventories again.
         d.gameOver = tag.getBoolean("gameOver");
         d.waveInProgress = tag.getBoolean("waveInProgress");
+        d.defenseMapBuilt = tag.getBoolean("defenseMapBuilt");
+        d.defenseMapX = tag.getInt("defenseMapX");
+        d.defenseMapY = tag.getInt("defenseMapY");
+        d.defenseMapZ = tag.getInt("defenseMapZ");
+        d.earlyBonusThroughWave = Math.max(0, Math.min(5, tag.getInt("earlyBonusThroughWave")));
         boolean legacyEconomy = tag.getInt("economyVersion") < 1;
         d.respawns = Math.max(0, tag.getInt("respawns"));
         d.lastGrantWave = Math.max(0, tag.getInt("lastGrantWave"));
@@ -61,6 +70,7 @@ public final class WaveData extends SavedData {
             for (int j = 0; j < a.levels.length; j++)
                 a.levels[j] = Math.max(0, Math.min(ShopRules.maxLevel(ShopRules.UPGRADE_IDS[j]), entry.getInt("upgrade" + j)));
             a.stockWave = Math.max(0, entry.getInt("stockWave"));
+            a.pendingInfusions = Math.max(0, Math.min(32, entry.getInt("pendingInfusions")));
             for (int j = 0; j < a.stock.length; j++) a.stock[j] = Math.max(0, entry.getInt("stock" + j));
             d.accounts.put(entry.getUUID("id"), a);
         }
@@ -87,8 +97,9 @@ public final class WaveData extends SavedData {
                 : bounded(tag, "bossReward", 150, 0, 2000);
         d.restMinStep = bounded(tag, "restMinStep", 2, 0, 10);
         d.restMaxStep = bounded(tag, "restMaxStep", 3, 0, 15);
-        d.restMaxCap = bounded(tag, "restMaxCap", 100, 60, 180);
-        d.enchantDropPercent = bounded(tag, "enchantDropPercent", 10, 0, 50);
+        d.restMaxCap = bounded(tag, "restMaxCap", 180, 60, 180);
+        d.earlyBonusAmount = bounded(tag, "earlyBonusAmount", 250, 0, 1000);
+        d.infuserChancePercent = bounded(tag, "infuserChancePercent", 1, 0, 10);
         d.nightPercent = bounded(tag, "nightPercent", 15, 0, 25);
         d.nightCap = bounded(tag, "nightCap", 16, 0, 32);
         d.respawnEarlyCap = bounded(tag, "respawnEarlyCap", 8, 1, 20);
@@ -114,6 +125,11 @@ public final class WaveData extends SavedData {
         tag.putInt("wave", wave); tag.putInt("highestWave", highestWave); tag.putBoolean("started", started);
         tag.putBoolean("gameOver", gameOver);
         tag.putBoolean("waveInProgress", waveInProgress);
+        tag.putBoolean("defenseMapBuilt", defenseMapBuilt);
+        tag.putInt("defenseMapX", defenseMapX);
+        tag.putInt("defenseMapY", defenseMapY);
+        tag.putInt("defenseMapZ", defenseMapZ);
+        tag.putInt("earlyBonusThroughWave", earlyBonusThroughWave);
         tag.putInt("economyVersion", 1);
         tag.putInt("respawns", respawns); tag.putInt("lastGrantWave", lastGrantWave);
         tag.put("eliminated", writeIds(eliminated)); tag.put("pendingRespawn", writeIds(pendingRespawn));
@@ -124,6 +140,7 @@ public final class WaveData extends SavedData {
             CompoundTag e = new CompoundTag(); e.putUUID("id", id); e.putLong("coins", a.coins);
             for (int i = 0; i < a.levels.length; i++) e.putInt("upgrade" + i, a.levels[i]);
             e.putInt("stockWave", a.stockWave);
+            e.putInt("pendingInfusions", a.pendingInfusions);
             for (int i = 0; i < a.stock.length; i++) e.putInt("stock" + i, a.stock[i]);
             savedAccounts.add(e);
         });
@@ -135,7 +152,9 @@ public final class WaveData extends SavedData {
         tag.putInt("killRewardEvery", killRewardEvery); tag.putInt("killBounty", killBounty);
         tag.putInt("bossReward", bossReward);
         tag.putInt("restMinStep", restMinStep); tag.putInt("restMaxStep", restMaxStep);
-        tag.putInt("restMaxCap", restMaxCap); tag.putInt("enchantDropPercent", enchantDropPercent);
+        tag.putInt("restMaxCap", restMaxCap);
+        tag.putInt("earlyBonusAmount", earlyBonusAmount);
+        tag.putInt("infuserChancePercent", infuserChancePercent);
         tag.putInt("nightPercent", nightPercent); tag.putInt("nightCap", nightCap);
         tag.putInt("respawnEarlyCap", respawnEarlyCap); tag.putInt("respawnLateWave", respawnLateWave);
         tag.putInt("respawnGrantInterval", respawnGrantInterval);
@@ -145,6 +164,7 @@ public final class WaveData extends SavedData {
     public Account account(UUID id) { return accounts.computeIfAbsent(id, ignored -> new Account()); }
     public void resetRun() {
         wave = 0;
+        earlyBonusThroughWave = 0;
         started = false;
         gameOver = false;
         waveInProgress = false;
@@ -180,6 +200,7 @@ public final class WaveData extends SavedData {
     }
     public static final class Account {
         public long coins;
+        public int pendingInfusions;
         public final int[] levels = new int[ShopRules.UPGRADE_IDS.length];
         public int stockWave;
         public final int[] stock = new int[ShopRules.NAMES.length];

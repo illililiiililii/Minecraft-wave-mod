@@ -11,7 +11,6 @@ import net.minecraft.client.renderer.entity.ZombieRenderer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.monster.Zombie;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -77,7 +76,7 @@ public final class ClientVisuals {
                     if (status.upgrades()[6] >= 1)
                         graphics.drawString(mc.font, "정찰: 다음 보스 " + (((status.wave() / 5) + 1) * 5) + "웨이브", x, y + 55, 0x99DDFF, true);
                     if (status.upgrades()[6] >= 2)
-                        graphics.drawString(mc.font, "빨강 보스 · 금색 수호자 · 하늘색 추적자", x, y + 66, 0x99DDFF, true);
+                        graphics.drawString(mc.font, "빨강 보스 · 보라 주입자 · 금색 수호자 · 하늘색 추적자", x, y + 66, 0x99DDFF, true);
                     if (status.upgrades()[6] >= 3)
                         graphics.drawString(mc.font, "현재 적 체력 배율 ×" + String.format(java.util.Locale.ROOT, "%.1f",
                                 BalanceRules.healthMultiplier(Math.max(1, status.wave()))), x, y + 77, 0x99DDFF, true);
@@ -87,10 +86,8 @@ public final class ClientVisuals {
     @Mod.EventBusSubscriber(modid = EndlessDefense.MODID, value = Dist.CLIENT)
     public static final class RuntimeEvents {
         @SubscribeEvent public static void nameTag(RenderNameTagEvent event) {
-            if (!(event.getEntity() instanceof LivingEntity mob) ||
-                    !(mob.getTags().contains("endlessdefense_wave") || mob.getType() == ModMobs.ASH_RUNNER.get()
-                            || mob.getType() == ModMobs.IRON_BULWARK.get()
-                            || mob.getType() == EntityType.ZOMBIE || mob.getType() == EntityType.SKELETON)) return;
+            if (!(event.getEntity() instanceof LivingEntity mob)
+                    || mob.getTeam() == null || !mob.getTeam().getName().startsWith("ed_wave_")) return;
             float max = Math.max(1, mob.getMaxHealth());
             int filled = Math.max(0, Math.min(10, Math.round(mob.getHealth() / max * 10)));
             int color = filled > 6 ? 0x55FF55 : filled > 3 ? 0xFFFF55 : 0xFF5555;
@@ -237,6 +234,7 @@ public final class ClientVisuals {
                 case 7 -> new ItemStack(Items.IRON_SWORD);
                 case 8 -> new ItemStack(Items.GLISTERING_MELON_SLICE);
                 case 9 -> new ItemStack(Items.SPYGLASS);
+                case 29 -> new ItemStack(Items.WIND_CHARGE);
                 default -> ShopRules.product(id).items()[0];
             };
         }

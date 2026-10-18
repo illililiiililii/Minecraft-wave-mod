@@ -4,8 +4,13 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.logging.LogUtils;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.core.Direction;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.tags.EnchantmentTags;
+import net.minecraft.tags.ItemTags;
 import net.minecraft.network.chat.Component;
 import net.minecraft.ChatFormatting;
 import net.minecraft.server.level.ServerBossEvent;
@@ -15,7 +20,6 @@ import net.minecraft.world.scores.Scoreboard;
 import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket;
 import net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket;
 import net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket;
-import net.minecraft.network.protocol.game.ClientboundStopSoundPacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -33,10 +37,12 @@ import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
+import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.AABB;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.TickEvent;
@@ -53,8 +59,6 @@ import net.minecraftforge.network.SimpleChannel;
 import org.slf4j.Logger;
 
 import java.util.HashSet;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -255,8 +259,10 @@ public final class EndlessDefense {
 
     private static void startRun(MinecraftServer server, Session game) {
         if (game.phase != Phase.LOBBY || !allReady(server, game)) return;
+        DefenseMap.ensure(server);
         WaveData data = WaveData.get(server);
         data.started = true;
+        data.earlyBonusThroughWave = 2 + server.overworld().random.nextInt(4);
         data.respawns = BalanceRules.initialTickets(data, server.getPlayerList().getPlayerCount());
         data.eliminated.clear();
         data.pendingRespawn.clear();
@@ -271,7 +277,9 @@ public final class EndlessDefense {
             player.teleportTo(server.overworld(), spawn.getX() + 0.5, spawn.getY() + 1, spawn.getZ() + 0.5,
                     player.getYRot(), player.getXRot());
         }
-        announce(server, "전원 준비 완료! 소지품을 비우고 월드 스폰에 모였습니다. 곧 첫 웨이브가 시작됩니다.");
+        announce(server, "전원 준비 완료! 소지품을 비우고 월드 스폰에 모였습니다. "
+                + data.earlyBonusThroughWave + "웨이브까지 클리어 보너스 +" + data.earlyBonusAmount
+                + " 노드. 곧 첫 웨이브가 시작됩니다.");
         scheduleWave(server, game);
     }
 
@@ -315,7 +323,7 @@ public final class EndlessDefense {
             clearBenefits(player, data.account(player.getUUID()));
             if (data.eliminated.contains(player.getUUID())) player.setGameMode(GameType.SURVIVAL);
         }
-        game.mobs.clear(); game.bossMobs.clear(); game.kills.clear(); game.loot.clear(); game.ready.clear(); game.surrenderVotes.clear();
+        game.mobs.clear(); game.bossMobs.clear(); game.kills.clear(); game.infusions.clear(); game.ready.clear(); game.surrenderVotes.clear();
         game.night = false;
         game.phase = Phase.LOBBY;
         data.resetRun();
@@ -323,7 +331,6 @@ public final class EndlessDefense {
         data.setDirty();
         announce(server, "팀이 웨이브를 포기해 이번 게임을 종료했습니다. 최고 기록은 유지되고 노드·업그레이드는 초기화됩니다.");
         title(server, "게임 종료", "다시 시작하려면 전원 준비", 10, 60, 10);
-        stopBattleMusic(server);
         cue(server, SoundEvents.WITHER_DEATH, 0.65f, 1.2f);
         sync(server);
     }
@@ -335,7 +342,7 @@ public final class EndlessDefense {
             if (mob != null) mob.discard();
             removeGlowTeam(server, id);
         }
-        game.mobs.clear(); game.bossMobs.clear(); game.kills.clear(); game.loot.clear();
+        game.mobs.clear(); game.bossMobs.clear(); game.kills.clear(); game.infusions.clear();
         game.phase = Phase.GAME_OVER;
         WaveData data = WaveData.get(server);
         data.gameOver = true;
@@ -343,7 +350,6 @@ public final class EndlessDefense {
         data.setDirty();
         announce(server, "팀 전멸! 게임이 멈췄습니다. H 화면의 종료 투표 또는 OP /endlessdefense stop으로 새 게임을 준비할 수 있습니다.");
         title(server, "게임 오버", "팀 부활 횟수를 모두 사용했습니다", 10, 80, 20);
-        stopBattleMusic(server);
         cue(server, SoundEvents.WITHER_DEATH, 0.8f, 0.8f);
         sync(server);
     }
@@ -355,6 +361,7 @@ public final class EndlessDefense {
         removeOwnedEffect(player, MobEffects.REGENERATION, account.levels[5] >= 5 ? 2 : account.levels[5] >= 3 ? 1 : 0);
         permanentAttribute(player, Attributes.ARMOR, "shop_armor", 0);
         permanentAttribute(player, Attributes.ATTACK_DAMAGE, "shop_attack", 0);
+        permanentAttribute(player, Attributes.ATTACK_KNOCKBACK, "shop_knockback", 0);
     }
 
     private static void removeOwnedEffect(ServerPlayer player, net.minecraft.core.Holder<net.minecraft.world.effect.MobEffect> type, int level) {
@@ -384,10 +391,9 @@ public final class EndlessDefense {
                 + (bossWave ? "철갑 수호자 출현! " : "") + "예정 적: " + total + " / 팀 부활 " + data.respawns);
         title(server, data.wave + "웨이브 시작!", bossWave ? "철갑 수호자 출현" : "적을 모두 처치하세요", 10, 50, 10);
         cue(server, SoundEvents.RAID_HORN.value(), 1.0f, bossWave ? 0.7f : 1.0f);
-        cue(server, SoundEvents.MUSIC_DISC_WARD.value(), 0.45f, 1.0f);
         game.kills.clear();
         game.bossMobs.clear();
-        game.loot.clear();
+        game.infusions.clear();
         game.bossKilled = false;
         game.escaped = false;
         game.spawning = true;
@@ -399,8 +405,12 @@ public final class EndlessDefense {
                     : data.wave >= 8 && i % 7 == 0 ? ModMobs.IRON_BULWARK.get()
                     : data.wave >= 4 && i % 4 == 0 ? ModMobs.ASH_RUNNER.get()
                     : data.wave >= 3 && i % 3 == 0 ? EntityType.SKELETON : EntityType.ZOMBIE;
-            BlockPos top = findSpawn(level, target, players);
-            if (top == null) { game.escaped = true; continue; }
+            BlockPos top = findSpawn(level, target, players, data, i);
+            if (top == null) {
+                LOGGER.warn("Wave {} spawn search failed near {} in {}", data.wave, target.blockPosition(), level.dimension().location());
+                game.escaped = true;
+                continue;
+            }
             Monster mob = type.create(level);
             if (mob == null) { game.escaped = true; continue; }
             mob.moveTo(top.getX() + 0.5, top.getY(), top.getZ() + 0.5, level.random.nextFloat() * 360f, 0);
@@ -408,10 +418,13 @@ public final class EndlessDefense {
             applyDifficulty(mob, data, boss, level);
             mob.addTag("endlessdefense_wave");
             if (boss) mob.addTag("endlessdefense_boss");
+            boolean infuser = !boss && level.random.nextInt(100) < data.infuserChancePercent;
+            if (infuser) mob.addTag("endlessdefense_infuser");
             mob.setGlowingTag(true);
             if (boss) {
                 mob.setCustomName(Component.literal("철갑 수호자 · " + data.wave + "웨이브"));
-            } else mob.setCustomName(mob.getType().getDescription());
+            } else if (infuser) mob.setCustomName(Component.literal("마력 주입자 · " + mob.getType().getDescription().getString()));
+            else mob.setCustomName(mob.getType().getDescription());
             mob.setCustomNameVisible(true);
             if (level.addFreshEntity(mob)) {
                 game.mobs.add(mob.getUUID());
@@ -434,14 +447,13 @@ public final class EndlessDefense {
             if (mob != null) mob.discard();
             removeGlowTeam(server, id);
         }
-        game.mobs.clear(); game.bossMobs.clear(); game.kills.clear(); game.loot.clear();
+        game.mobs.clear(); game.bossMobs.clear(); game.kills.clear(); game.infusions.clear();
         game.bossKilled = false;
         game.retrying = true;
         data.wave = Math.max(0, data.wave - 1);
         data.waveInProgress = false;
         data.setDirty();
         announce(server, reason + ": 보상 없이 같은 웨이브를 다시 준비합니다.");
-        stopBattleMusic(server);
         scheduleWave(server, game);
     }
 
@@ -450,35 +462,59 @@ public final class EndlessDefense {
         return time >= 13000 && time < 23000;
     }
 
-    private static BlockPos findSpawn(ServerLevel level, ServerPlayer target, java.util.List<ServerPlayer> players) {
+    private static BlockPos findSpawn(ServerLevel level, ServerPlayer target,
+                                      java.util.List<ServerPlayer> players, WaveData data, int index) {
+        BlockPos lane = DefenseMap.laneSpawn(level, target, players, data, index);
+        if (lane != null) return lane;
         // Prefer accessible spaces near the target's elevation, including caves and tree canopies.
-        for (int attempt = 0; attempt < 40; attempt++) {
-            int dx = (level.random.nextBoolean() ? 1 : -1) * (8 + level.random.nextInt(15));
-            int dz = (level.random.nextBoolean() ? 1 : -1) * (8 + level.random.nextInt(15));
+        for (int attempt = 0; attempt < 80; attempt++) {
+            int dx = (level.random.nextBoolean() ? 1 : -1) * (9 + level.random.nextInt(24));
+            int dz = (level.random.nextBoolean() ? 1 : -1) * (9 + level.random.nextInt(24));
             BlockPos candidate = target.blockPosition().offset(dx, level.random.nextInt(9) - 4, dz);
             for (int down = 0; down <= 4; down++) {
                 BlockPos spot = candidate.below(down);
-                BlockPos floor = spot.below();
-                var support = level.getBlockState(floor);
-                if (!level.getBlockState(spot).isAir() || !level.getBlockState(spot.above()).isAir()
-                        || !(support.isFaceSturdy(level, floor, Direction.UP) || support.is(BlockTags.LEAVES))) continue;
-                boolean nearPlayer = players.stream().anyMatch(p -> p.serverLevel() == level
-                        && p.distanceToSqr(spot.getX() + .5, spot.getY(), spot.getZ() + .5) < 81);
-                if (!nearPlayer) return spot;
+                if (safeSpawn(level, spot, players, data)) return spot;
             }
         }
-        for (int attempt = 0; attempt < 24; attempt++) {
-            int dx = (level.random.nextBoolean() ? 1 : -1) * (12 + level.random.nextInt(15));
-            int dz = (level.random.nextBoolean() ? 1 : -1) * (12 + level.random.nextInt(15));
+        for (int attempt = 0; attempt < 80; attempt++) {
+            int dx = (level.random.nextBoolean() ? 1 : -1) * (12 + level.random.nextInt(36));
+            int dz = (level.random.nextBoolean() ? 1 : -1) * (12 + level.random.nextInt(36));
             BlockPos top = level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
                     target.blockPosition().offset(dx, 0, dz));
-            if (!level.getBlockState(top).isAir() || !level.getBlockState(top.above()).isAir()
-                    || !level.getBlockState(top.below()).isSolid()) continue;
-            boolean nearPlayer = players.stream().anyMatch(p -> p.serverLevel() == level
-                    && p.distanceToSqr(top.getX() + .5, top.getY(), top.getZ() + .5) < 100);
-            if (!nearPlayer) return top;
+            if (level.getBlockState(top).is(Blocks.SNOW)) top = top.above();
+            if (safeSpawn(level, top, players, data)) return top;
         }
+        // An evenly spaced ring handles steep snowy slopes that random samples can miss.
+        for (int radius = 12; radius <= 48; radius += 4)
+            for (int direction = 0; direction < 16; direction++) {
+                double angle = direction * Math.PI / 8;
+                int x = target.getBlockX() + (int) Math.round(Math.cos(angle) * radius);
+                int z = target.getBlockZ() + (int) Math.round(Math.sin(angle) * radius);
+                BlockPos top = level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                        new BlockPos(x, target.getBlockY(), z));
+                if (level.getBlockState(top).is(Blocks.SNOW)) top = top.above();
+                if (safeSpawn(level, top, players, data)) return top;
+            }
         return null;
+    }
+
+    static boolean hasSafeSupport(ServerLevel level, BlockPos floor) {
+        var state = level.getBlockState(floor);
+        if (state.isFaceSturdy(level, floor, Direction.UP) || state.is(BlockTags.LEAVES)) return true;
+        BlockPos below = floor.below();
+        return state.is(Blocks.SNOW) && level.getBlockState(below).isFaceSturdy(level, below, Direction.UP);
+    }
+
+    private static boolean safeSpawn(ServerLevel level, BlockPos spot,
+                                     java.util.List<ServerPlayer> players, WaveData data) {
+        if (data.defenseMapBuilt && level == level.getServer().overworld()
+                && Math.abs(spot.getX() - data.defenseMapX) <= 20
+                && Math.abs(spot.getZ() - data.defenseMapZ) <= 20) return false;
+        if (!level.getBlockState(spot).isAir() || !level.getBlockState(spot.above()).isAir()
+                || !level.getFluidState(spot).isEmpty() || !hasSafeSupport(level, spot.below())
+                || !level.getEntitiesOfClass(Monster.class, new AABB(spot).inflate(0.6)).isEmpty()) return false;
+        return players.stream().noneMatch(p -> p.serverLevel() == level
+                && p.distanceToSqr(spot.getX() + .5, spot.getY(), spot.getZ() + .5) < 100);
     }
 
     private static void breachSoftBlock(MinecraftServer server, Session game) {
@@ -547,10 +583,15 @@ public final class EndlessDefense {
         for (ServerPlayer player : participants(server, data)) data.award(player.getUUID(), reward);
         for (var entry : game.kills.entrySet()) data.award(entry.getKey(), (entry.getValue() / data.killRewardEvery) * (long) data.killBounty);
         if (game.bossKilled) for (ServerPlayer player : participants(server, data)) data.award(player.getUUID(), data.bossReward);
-        for (var entry : game.loot.entrySet()) {
+        for (var entry : game.infusions.entrySet()) {
+            WaveData.Account account = data.account(entry.getKey());
+            account.pendingInfusions = Math.min(32, account.pendingInfusions + entry.getValue());
             ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
-            if (player != null) for (ItemStack stack : entry.getValue())
-                if (!player.getInventory().add(stack)) player.drop(stack, false);
+            if (player != null) {
+                player.sendSystemMessage(Component.literal("마력 주입 " + entry.getValue()
+                        + "회 획득! 무기를 주 손에 들면 무작위 인챈트가 적용됩니다."));
+                applyPendingInfusions(player, data);
+            }
         }
         // A cleared wave begins a fresh team life pool. Spectators return for the next wave.
         data.restoreSurvival.addAll(data.eliminated);
@@ -568,9 +609,8 @@ public final class EndlessDefense {
         data.waveInProgress = false;
         data.setDirty();
         announce(server, wave + "웨이브 클리어! 기본 +" + reward + " 노드"
-                + (game.bossKilled ? ", 보스 +" + data.bossReward : "") + " · 체력 회복 · 전리품 지급. 다음 웨이브는 자동 시작됩니다.");
+                + (game.bossKilled ? ", 보스 +" + data.bossReward : "") + " · 체력 회복. 다음 웨이브는 자동 시작됩니다.");
         title(server, wave + "웨이브 클리어!", "체력 회복 · 기본 +" + reward + " 노드", 10, 50, 10);
-        stopBattleMusic(server);
         cue(server, SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, 0.9f, 1.0f);
         scheduleWave(server, game);
     }
@@ -578,12 +618,6 @@ public final class EndlessDefense {
     private static void cue(MinecraftServer server, net.minecraft.sounds.SoundEvent sound, float volume, float pitch) {
         for (ServerPlayer player : server.getPlayerList().getPlayers())
             player.playNotifySound(sound, SoundSource.RECORDS, volume, pitch);
-    }
-
-    private static void stopBattleMusic(MinecraftServer server) {
-        for (ServerPlayer player : server.getPlayerList().getPlayers())
-            player.connection.send(new ClientboundStopSoundPacket(
-                    ResourceLocation.fromNamespaceAndPath("minecraft", "music_disc.ward"), SoundSource.RECORDS));
     }
 
     private static void title(MinecraftServer server, String main, String subtitle, int fadeIn, int stay, int fadeOut) {
@@ -602,9 +636,42 @@ public final class EndlessDefense {
         persistentEffect(player, MobEffects.REGENERATION, regen);
         permanentAttribute(player, Attributes.ARMOR, "shop_armor", account.levels[3]);
         permanentAttribute(player, Attributes.ATTACK_DAMAGE, "shop_attack", account.levels[4]);
+        permanentAttribute(player, Attributes.ATTACK_KNOCKBACK, "shop_knockback", account.levels[7] * 0.2);
         if (account.levels[5] > 0 && player.isAlive()
                 && player.getHealth() < player.getMaxHealth())
             player.heal(account.levels[5] * 0.5f);
+    }
+
+    private static void applyPendingInfusions(ServerPlayer player, WaveData data) {
+        WaveData.Account account = data.account(player.getUUID());
+        if (account.pendingInfusions <= 0) return;
+        ItemStack weapon = player.getMainHandItem();
+        if (!(weapon.is(ItemTags.WEAPON_ENCHANTABLE) || weapon.is(ItemTags.BOW_ENCHANTABLE)
+                || weapon.is(ItemTags.CROSSBOW_ENCHANTABLE) || weapon.is(ItemTags.TRIDENT_ENCHANTABLE)
+                || weapon.is(ItemTags.MACE_ENCHANTABLE))) return;
+        var choices = infusionOptions(weapon, player.registryAccess());
+        if (choices.isEmpty()) return;
+        var chosen = choices.get(player.getRandom().nextInt(choices.size()));
+        int level = Math.min(chosen.value().getMaxLevel(), 1 + Math.max(0, data.wave - 1) / 12);
+        weapon.enchant(chosen, level);
+        account.pendingInfusions--;
+        data.setDirty();
+        player.sendSystemMessage(Component.literal("무기에 " + chosen.value().description().getString()
+                + " " + level + " 인챈트가 적용됐습니다. 남은 마력 주입 " + account.pendingInfusions + "회"));
+        player.playNotifySound(SoundEvents.ENCHANTMENT_TABLE_USE, SoundSource.PLAYERS, 0.8f, 1.0f);
+    }
+
+    static java.util.List<Holder.Reference<Enchantment>> infusionOptions(ItemStack weapon, RegistryAccess registries) {
+        if (!(weapon.is(ItemTags.WEAPON_ENCHANTABLE) || weapon.is(ItemTags.BOW_ENCHANTABLE)
+                || weapon.is(ItemTags.CROSSBOW_ENCHANTABLE) || weapon.is(ItemTags.TRIDENT_ENCHANTABLE)
+                || weapon.is(ItemTags.MACE_ENCHANTABLE))) return java.util.List.of();
+        var existing = EnchantmentHelper.getEnchantmentsForCrafting(weapon);
+        return registries.registryOrThrow(Registries.ENCHANTMENT).holders()
+                .filter(enchantment -> enchantment.is(EnchantmentTags.IN_ENCHANTING_TABLE)
+                        && enchantment.value().canEnchant(weapon)
+                        && !existing.keySet().contains(enchantment)
+                        && existing.keySet().stream().allMatch(other -> Enchantment.areCompatible(enchantment, other)))
+                .toList();
     }
 
     private static void persistentEffect(ServerPlayer player, net.minecraft.core.Holder<net.minecraft.world.effect.MobEffect> effect, int level) {
@@ -643,6 +710,7 @@ public final class EndlessDefense {
             if (data.started && !data.gameOver && data.teamMembers.add(player.getUUID())) data.setDirty();
             if (data.pendingRespawn.remove(player.getUUID())) data.setDirty();
             applyBenefits(player, data.account(player.getUUID()));
+            applyPendingInfusions(player, data);
             player.sendSystemMessage(Component.literal("[Endless Defense] G: 최초 준비, H: 진행 상황, K: 상점"));
             sync(player.server);
         }
@@ -663,13 +731,29 @@ public final class EndlessDefense {
             WaveData data = WaveData.get(level.getServer());
             if (event.getEntity() instanceof ServerPlayer player && game.phase != Phase.LOBBY
                     && !data.pendingRespawn.contains(player.getUUID()) && !data.eliminated.contains(player.getUUID())) {
-                if (data.respawns > 0) {
-                    data.respawns--;
-                    data.pendingRespawn.add(player.getUUID());
-                    announce(level.getServer(), player.getName().getString() + " 사망 · 팀 부활 사용, 남은 횟수 " + data.respawns);
+                int tick = level.getServer().getTickCount();
+                boolean recentRescue = tick - game.lastRescueTick.getOrDefault(player.getUUID(), -1000) < 20;
+                if (data.respawns > 0 || recentRescue) {
+                    if (!recentRescue) {
+                        data.respawns--;
+                        game.lastRescueTick.put(player.getUUID(), tick);
+                        announce(level.getServer(), player.getName().getString()
+                                + " 불사의 토템 효과로 생존! 팀 부활 남은 횟수 " + data.respawns);
+                        data.setDirty();
+                        sync(level.getServer());
+                    }
+                    player.setHealth(1.0f);
+                    player.invulnerableTime = 20;
+                    player.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 900, 1));
+                    player.addEffect(new MobEffectInstance(MobEffects.ABSORPTION, 100, 1));
+                    player.addEffect(new MobEffectInstance(MobEffects.FIRE_RESISTANCE, 800, 0));
+                    level.broadcastEntityEvent(player, (byte) 35);
+                    event.setCanceled(true);
+                    return;
                 } else {
                     data.eliminated.add(player.getUUID());
-                    announce(level.getServer(), player.getName().getString() + " 사망 · 팀 부활 소진, 관전 모드로 전환됩니다.");
+                    announce(level.getServer(), player.getName().getString()
+                            + " 사망 · 팀 부활 소진, 관전 모드로 전환됩니다.");
                 }
                 data.setDirty();
                 sync(level.getServer());
@@ -683,11 +767,8 @@ public final class EndlessDefense {
                 Entity attacker = event.getSource().getEntity();
                 if (attacker instanceof ServerPlayer killer && !data.eliminated.contains(killer.getUUID())) {
                     game.kills.merge(killer.getUUID(), 1, Integer::sum);
-                    if (boss || level.random.nextInt(100) < Math.min(25, data.enchantDropPercent + data.wave / 10)) {
-                        ItemStack book = EnchantmentHelper.enchantItem(level.random, new ItemStack(Items.BOOK),
-                                Math.min(30, 8 + data.wave / 2), level.registryAccess(), java.util.Optional.empty());
-                        game.loot.computeIfAbsent(killer.getUUID(), id -> new ArrayList<>()).add(book);
-                    }
+                    if (event.getEntity().getTags().contains("endlessdefense_infuser"))
+                        game.infusions.merge(killer.getUUID(), 1, Integer::sum);
                 }
                 if (game.mobs.isEmpty()) finishWave(level.getServer(), game);
                 else sync(level.getServer());
@@ -717,24 +798,27 @@ public final class EndlessDefense {
         }
         boolean waveOrCustom = mob.getTags().contains("endlessdefense_wave")
                 || mob.getType() == ModMobs.ASH_RUNNER.get() || mob.getType() == ModMobs.IRON_BULWARK.get();
-        if (waveOrCustom || mob.getType() == EntityType.ZOMBIE || mob.getType() == EntityType.SKELETON) {
+        if (mob.getTags().contains("endlessdefense_wave")) {
             if (mob.getCustomName() == null) mob.setCustomName(mob.getType().getDescription());
             mob.setCustomNameVisible(true);
-            if (waveOrCustom) assignGlow(mob);
         }
+        if (waveOrCustom) assignGlow(mob);
     }
 
-    private static void assignGlow(Monster mob) {
+    static void assignGlow(Monster mob) {
         mob.setGlowingTag(true);
-        String name = mob.getTags().contains("endlessdefense_boss") ? "ed_boss"
-                : mob.getType() == ModMobs.IRON_BULWARK.get() ? "ed_bulwark"
-                : mob.getType() == ModMobs.ASH_RUNNER.get() ? "ed_runner"
-                : mob instanceof Skeleton ? "ed_skeleton" : "ed_zombie";
+        boolean wave = mob.getTags().contains("endlessdefense_wave");
+        String name = wave && mob.getTags().contains("endlessdefense_boss") ? "ed_wave_boss"
+                : wave && mob.getTags().contains("endlessdefense_infuser") ? "ed_wave_infuser"
+                : mob.getType() == ModMobs.IRON_BULWARK.get() ? wave ? "ed_wave_bulwark" : "ed_bulwark"
+                : mob.getType() == ModMobs.ASH_RUNNER.get() ? wave ? "ed_wave_runner" : "ed_runner"
+                : mob instanceof Skeleton ? "ed_wave_skeleton" : "ed_wave_zombie";
         ChatFormatting color = switch (name) {
-            case "ed_boss" -> ChatFormatting.RED;
-            case "ed_bulwark" -> ChatFormatting.GOLD;
-            case "ed_runner" -> ChatFormatting.AQUA;
-            case "ed_skeleton" -> ChatFormatting.YELLOW;
+            case "ed_wave_boss" -> ChatFormatting.RED;
+            case "ed_wave_infuser" -> ChatFormatting.LIGHT_PURPLE;
+            case "ed_wave_bulwark", "ed_bulwark" -> ChatFormatting.GOLD;
+            case "ed_wave_runner", "ed_runner" -> ChatFormatting.AQUA;
+            case "ed_wave_skeleton" -> ChatFormatting.YELLOW;
             default -> ChatFormatting.WHITE;
         };
         Scoreboard scoreboard = mob.level().getScoreboard();
@@ -753,7 +837,10 @@ public final class EndlessDefense {
     @SubscribeEvent public void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END || event.getServer().getTickCount() % 20 != 0) return;
         MinecraftServer server = event.getServer();
+        DefenseMap.ensure(server);
         Session game = session(server);
+        for (ServerPlayer player : server.getPlayerList().getPlayers())
+            applyPendingInfusions(player, WaveData.get(server));
         if (server.getTickCount() % 200 == 0)
             for (ServerPlayer player : server.getPlayerList().getPlayers())
                 applyBenefits(player, WaveData.get(server).account(player.getUUID()));
@@ -762,7 +849,7 @@ public final class EndlessDefense {
                 Entity entity = findEntity(server, id);
                 if (entity instanceof Monster mob) {
                     mob.setGlowingTag(true);
-                    if (mob.getTeam() == null || !mob.getTeam().getName().startsWith("ed_")) assignGlow(mob);
+                    if (mob.getTeam() == null || !mob.getTeam().getName().startsWith("ed_wave_")) assignGlow(mob);
                 }
             }
         if (game.phase == Phase.LOBBY) {
@@ -850,7 +937,9 @@ public final class EndlessDefense {
                                     + " night=" + d.nightPercent + " nightCap=" + d.nightCap + " respawnCap=" + d.respawnEarlyCap
                                     + " lateWave=" + d.respawnLateWave
                                     + " restMinStep=" + d.restMinStep + " restMaxStep=" + d.restMaxStep
-                                    + " restMaxCap=" + d.restMaxCap + " enchantDrop=" + d.enchantDropPercent), false);
+                                    + " restMaxCap=" + d.restMaxCap + " earlyBonus=" + d.earlyBonusAmount
+                                    + " earlyBonusThrough=" + d.earlyBonusThroughWave
+                                    + " infuser=" + d.infuserChancePercent), false);
                             return 1;
                         }))
                         .then(setting("early", 10, 1000)).then(setting("earlyStep", 0, 200))
@@ -860,7 +949,8 @@ public final class EndlessDefense {
                         .then(setting("night", 0, 25)).then(setting("nightCap", 0, 32))
                         .then(setting("respawnCap", 1, 20)).then(setting("lateWave", 10, 200))
                         .then(setting("restMinStep", 0, 10)).then(setting("restMaxStep", 0, 15))
-                        .then(setting("restMaxCap", 60, 180)).then(setting("enchantDrop", 0, 50)));
+                        .then(setting("restMaxCap", 60, 180)).then(setting("earlyBonus", 0, 1000))
+                        .then(setting("infuser", 0, 10)).then(setting("enchantDrop", 0, 10)));
         event.getDispatcher().register(root);
     }
 
@@ -899,7 +989,8 @@ public final class EndlessDefense {
             case "restMinStep" -> value >= 0 && value <= 10;
             case "restMaxStep" -> value >= 0 && value <= 15;
             case "restMaxCap" -> value >= 60 && value <= 180;
-            case "enchantDrop" -> value >= 0 && value <= 50;
+            case "earlyBonus" -> value >= 0 && value <= 1000;
+            case "infuser", "enchantDrop" -> value >= 0 && value <= 10;
             default -> false;
         };
         if (!valid) return false;
@@ -924,7 +1015,8 @@ public final class EndlessDefense {
             case "restMinStep" -> data.restMinStep = value;
             case "restMaxStep" -> data.restMaxStep = value;
             case "restMaxCap" -> data.restMaxCap = value;
-            case "enchantDrop" -> data.enchantDropPercent = value;
+            case "earlyBonus" -> data.earlyBonusAmount = value;
+            case "infuser", "enchantDrop" -> data.infuserChancePercent = value;
         }
         data.setDirty();
         return true;
@@ -946,7 +1038,8 @@ public final class EndlessDefense {
         final Set<UUID> mobs = new HashSet<>();
         final Set<UUID> bossMobs = new HashSet<>();
         final Map<UUID, Integer> kills = new java.util.HashMap<>();
-        final Map<UUID, List<ItemStack>> loot = new java.util.HashMap<>();
+        final Map<UUID, Integer> infusions = new java.util.HashMap<>();
+        final Map<UUID, Integer> lastRescueTick = new java.util.HashMap<>();
 
         Session(boolean started, MinecraftServer server) {
             WaveData data = WaveData.get(server);

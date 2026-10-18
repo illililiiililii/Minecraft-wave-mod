@@ -18,13 +18,14 @@ public final class ShopRules {
     }
     public record Product(String name, String description, long price, int unlockWave, int perWave, ItemStack[] items) {}
     public static final long[] UPGRADE_COSTS = {30, 100, 300, 850, 2000};
-    public static final int[] UPGRADE_IDS = {0, 1, 2, 6, 7, 8, 9};
+    public static final int[] UPGRADE_IDS = {0, 1, 2, 6, 7, 8, 9, 29};
     public static final String[] NAMES = {
             "빠른 채굴", "추가 체력", "이동 속도", "철 장비 꾸러미", "다이아 장비 꾸러미", "종결 네더라이트 장비",
             "방어 강화", "공격력 강화", "회복 능력", "정찰 강화", "빵 ×8", "구운 소고기 ×8", "황금 사과",
             "즉시 회복 물약 ×2", "횃불 ×32", "랜턴 ×8", "참나무 원목 ×32", "조약돌 ×64", "철 주괴 ×8",
             "화살 ×32", "모루", "석재 벽돌 ×64", "흑요석 ×16", "거미줄 ×8", "방패", "토템", "마법 황금 사과",
-            "돌 검", "가죽 방어구 꾸러미"
+            "돌 검", "가죽 방어구 꾸러미", "넉백 강화", "눈덩이 ×16", "감속 투척 물약 ×2",
+            "끈끈이 피스톤 ×4 + 레드스톤 ×16", "발사기 ×4 + 화살 ×32", "바람 구체 ×4"
     };
     private static final Product[] PRODUCTS = {
             upgrade("빠른 채굴", "채굴 속도 +20%/단계"), upgrade("추가 체력", "최대 체력 +4/단계"),
@@ -53,7 +54,18 @@ public final class ShopRules {
             supply("마법 황금 사과", "후반 긴급 생존", 5500, 30, 1, new ItemStack(Items.ENCHANTED_GOLDEN_APPLE)),
             supply("돌 검", "초반 기본 무기", 80, 1, 0, new ItemStack(Items.STONE_SWORD)),
             gear("가죽 방어구 꾸러미", "초반 방어구 4부위", 240, 1, 0,
-                    Items.LEATHER_HELMET, Items.LEATHER_CHESTPLATE, Items.LEATHER_LEGGINGS, Items.LEATHER_BOOTS)
+                    Items.LEATHER_HELMET, Items.LEATHER_CHESTPLATE, Items.LEATHER_LEGGINGS, Items.LEATHER_BOOTS),
+            upgrade("넉백 강화", "근접 공격 넉백 +0.2/단계"),
+            supply("눈덩이 ×16", "저렴한 투척물", 65, 1, 0, new ItemStack(Items.SNOWBALL, 16)),
+            supply("감속 투척 물약 ×2", "진입로의 적을 느리게 함", 460, 4, 2,
+                    PotionContents.createItemStack(Items.SPLASH_POTION, Potions.SLOWNESS),
+                    PotionContents.createItemStack(Items.SPLASH_POTION, Potions.SLOWNESS)),
+            supply("끈끈이 피스톤 ×4 + 레드스톤 ×16", "움직이는 바리케이드 재료", 390, 5, 2,
+                    new ItemStack(Items.STICKY_PISTON, 4), new ItemStack(Items.REDSTONE, 16)),
+            supply("발사기 ×4 + 화살 ×32", "자동 방어 장치 재료", 440, 5, 2,
+                    new ItemStack(Items.DISPENSER, 4), new ItemStack(Items.ARROW, 32)),
+            supply("바람 구체 ×4", "적을 밀어내는 방어용 투척물", 420, 4, 2,
+                    new ItemStack(Items.WIND_CHARGE, 4))
     };
 
     private static Product upgrade(String name, String description) { return new Product(name, description, 0, 1, 0, new ItemStack[0]); }
@@ -74,9 +86,9 @@ public final class ShopRules {
         if (upgradeSlot(id) >= 0 || product(id) == null) return null;
         return switch (id) {
             case 10, 11, 12, 13, 26 -> Category.FOOD;
-            case 14, 15, 18, 19, 20, 25 -> Category.UTILITY;
+            case 14, 15, 18, 19, 20, 25, 30, 31, 34 -> Category.UTILITY;
             case 3, 4, 5, 24, 27, 28 -> Category.ARMOR;
-            case 16, 17, 21, 22, 23 -> Category.BUILDING;
+            case 16, 17, 21, 22, 23, 32, 33 -> Category.BUILDING;
             default -> null;
         };
     }
@@ -102,6 +114,7 @@ public final class ShopRules {
             case 7 -> "근접 공격력 +" + next;
             case 8 -> "10초마다 체력 +" + (next * 0.5) + (next >= 5 ? " · 재생 II" : next >= 3 ? " · 재생 I" : "");
             case 9 -> next == 1 ? "다음 보스 웨이브 표시" : next == 2 ? "발광 색상 범례 표시" : "적 체력 배율 표시";
+            case 29 -> "근접 넉백 +" + (next * 0.2);
             default -> "";
         };
     }

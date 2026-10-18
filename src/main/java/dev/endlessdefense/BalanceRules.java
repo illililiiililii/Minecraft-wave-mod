@@ -5,19 +5,21 @@ public final class BalanceRules {
     private BalanceRules() {}
 
     public static long clearReward(WaveData data, int wave) {
-        if (wave <= 5) return data.earlyReward + (wave - 1L) * data.earlyRewardStep;
-        if (wave <= 20) return data.earlyReward + 4L * data.earlyRewardStep + (wave - 5L) * data.midRewardStep;
-        return data.earlyReward + 4L * data.earlyRewardStep + 15L * data.midRewardStep
+        long base;
+        if (wave <= 5) base = data.earlyReward + (wave - 1L) * data.earlyRewardStep;
+        else if (wave <= 20) base = data.earlyReward + 4L * data.earlyRewardStep + (wave - 5L) * data.midRewardStep;
+        else base = data.earlyReward + 4L * data.earlyRewardStep + 15L * data.midRewardStep
                 + (long) Math.floor(Math.sqrt(wave - 20L)) * data.lateRewardStep;
+        return base + (wave >= 1 && wave <= data.earlyBonusThroughWave ? data.earlyBonusAmount : 0);
     }
 
     public static int restMin(WaveData data, int clearedWave) {
-        return Math.min(35, 11 + Math.max(0, clearedWave) / 5 * data.restMinStep);
+        return Math.min(90, 45 + Math.max(0, clearedWave) / 5 * data.restMinStep);
     }
 
     public static int restMax(WaveData data, int clearedWave) {
         return Math.max(restMin(data, clearedWave),
-                Math.min(data.restMaxCap, 60 + Math.max(0, clearedWave) / 5 * data.restMaxStep));
+                Math.min(data.restMaxCap, 120 + Math.max(0, clearedWave) / 5 * data.restMaxStep));
     }
 
     public static int nightCount(WaveData data, int base, boolean night) {
