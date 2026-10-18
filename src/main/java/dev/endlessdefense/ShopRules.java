@@ -10,6 +10,10 @@ import java.util.Comparator;
 /** Stable product IDs: 0–5 preserve saves from 0.3. */
 public final class ShopRules {
     private ShopRules() {}
+    public static final int TURRET_ID = 35, TURRET_UPGRADE_ID = 36, TURRET_REPAIR_ID = 37;
+    public static final int MAX_TURRETS = 4, MAX_TURRET_LEVEL = 5;
+    public static final long TURRET_PRICE = 3000, TURRET_REPAIR_PRICE = 700;
+    private static final long[] TURRET_UPGRADE_COSTS = {2500, 5500, 9500, 16000};
     public enum Category {
         FOOD("음식"), UTILITY("유용한 아이템"), ARMOR("방어구"), BUILDING("건축");
         private final String title;
@@ -25,7 +29,8 @@ public final class ShopRules {
             "즉시 회복 물약 ×2", "횃불 ×32", "랜턴 ×8", "참나무 원목 ×32", "조약돌 ×64", "철 주괴 ×8",
             "화살 ×32", "모루", "석재 벽돌 ×64", "흑요석 ×16", "거미줄 ×8", "방패", "토템", "마법 황금 사과",
             "돌 검", "가죽 방어구 꾸러미", "넉백 강화", "눈덩이 ×16", "감속 투척 물약 ×2",
-            "끈끈이 피스톤 ×4 + 레드스톤 ×16", "발사기 ×4 + 화살 ×32", "바람 구체 ×4"
+            "끈끈이 피스톤 ×4 + 레드스톤 ×16", "발사기 ×4 + 화살 ×32", "바람 구체 ×4",
+            "자동 사냥 포탑", "포탑 강화", "포탑 수리"
     };
     private static final Product[] PRODUCTS = {
             upgrade("빠른 채굴", "채굴 속도 +20%/단계"), upgrade("추가 체력", "최대 체력 +4/단계"),
@@ -65,7 +70,13 @@ public final class ShopRules {
             supply("발사기 ×4 + 화살 ×32", "자동 방어 장치 재료", 440, 5, 2,
                     new ItemStack(Items.DISPENSER, 4), new ItemStack(Items.ARROW, 32)),
             supply("바람 구체 ×4", "적을 밀어내는 방어용 투척물", 420, 4, 2,
-                    new ItemStack(Items.WIND_CHARGE, 4))
+                    new ItemStack(Items.WIND_CHARGE, 4)),
+            supply("자동 사냥 포탑", "디펜스 야생 거점에 팀 포탑 설치 · 최대 4기", TURRET_PRICE, 3, 0,
+                    new ItemStack(Items.DISPENSER)),
+            supply("포탑 강화", "팀 포탑 중 최저 레벨 1기 강화 · 최대 5단계", 0, 6, 0,
+                    new ItemStack(Items.CROSSBOW)),
+            supply("포탑 수리", "파손된 팀 포탑 1기 재가동 · 아래 상자는 보존", TURRET_REPAIR_PRICE, 3, 0,
+                    new ItemStack(Items.ANVIL))
     };
 
     private static Product upgrade(String name, String description) { return new Product(name, description, 0, 1, 0, new ItemStack[0]); }
@@ -88,7 +99,7 @@ public final class ShopRules {
             case 10, 11, 12, 13, 26 -> Category.FOOD;
             case 14, 15, 18, 19, 20, 25, 30, 31, 34 -> Category.UTILITY;
             case 3, 4, 5, 24, 27, 28 -> Category.ARMOR;
-            case 16, 17, 21, 22, 23, 32, 33 -> Category.BUILDING;
+            case 16, 17, 21, 22, 23, 32, 33, TURRET_ID, TURRET_UPGRADE_ID, TURRET_REPAIR_ID -> Category.BUILDING;
             default -> null;
         };
     }
@@ -121,8 +132,25 @@ public final class ShopRules {
     public static long cost(int product, int level) {
         Product item = product(product);
         if (item == null) return -1;
+        if (product == TURRET_UPGRADE_ID) return turretUpgradeCost(level);
         if (upgradeSlot(product) >= 0) return level >= 0 && level < maxLevel(product) ? UPGRADE_COSTS[level] : -1;
         return item.price();
+    }
+    public static long turretUpgradeCost(int level) {
+        return level >= 1 && level < MAX_TURRET_LEVEL ? TURRET_UPGRADE_COSTS[level - 1] : -1;
+    }
+    public static float turretDamage(int level) { return 2.0f + level * 2.0f; }
+    public static int turretInterval(int level) { return Math.max(16, 36 - level * 4); }
+    public static int turretRange(int level) { return 23 + level * 2; }
+    public static int lowestTurretLevel(int[] levels) {
+        int lowest = MAX_TURRET_LEVEL;
+        for (int level : levels) if (level > 0) lowest = Math.min(lowest, level);
+        return lowest;
+    }
+    public static int turretCount(int[] levels) {
+        int count = 0;
+        for (int level : levels) if (level > 0) count++;
+        return count;
     }
     public static ItemStack[] gear(int product) {
         Product item = product(product);

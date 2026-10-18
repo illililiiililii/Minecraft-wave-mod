@@ -23,6 +23,7 @@ public final class WaveData extends SavedData {
     public boolean waveInProgress;
     public boolean defenseMapBuilt;
     public int defenseMapX, defenseMapY, defenseMapZ;
+    public final int[] turretLevels = new int[ShopRules.MAX_TURRETS];
     public int earlyBonusThroughWave;
     public int respawns, lastGrantWave;
     public final Set<UUID> eliminated = new HashSet<>(), pendingRespawn = new HashSet<>();
@@ -52,6 +53,8 @@ public final class WaveData extends SavedData {
         d.defenseMapX = tag.getInt("defenseMapX");
         d.defenseMapY = tag.getInt("defenseMapY");
         d.defenseMapZ = tag.getInt("defenseMapZ");
+        for (int i = 0; i < d.turretLevels.length; i++)
+            d.turretLevels[i] = Math.max(0, Math.min(ShopRules.MAX_TURRET_LEVEL, tag.getInt("turretLevel" + i)));
         d.earlyBonusThroughWave = Math.max(0, Math.min(5, tag.getInt("earlyBonusThroughWave")));
         boolean legacyEconomy = tag.getInt("economyVersion") < 1;
         d.respawns = Math.max(0, tag.getInt("respawns"));
@@ -99,7 +102,7 @@ public final class WaveData extends SavedData {
         d.restMaxStep = bounded(tag, "restMaxStep", 3, 0, 15);
         d.restMaxCap = bounded(tag, "restMaxCap", 180, 60, 180);
         d.earlyBonusAmount = bounded(tag, "earlyBonusAmount", 250, 0, 1000);
-        d.infuserChancePercent = bounded(tag, "infuserChancePercent", 1, 0, 10);
+        d.infuserChancePercent = bounded(tag, "infuserChancePercent", 1, 0, 100);
         d.nightPercent = bounded(tag, "nightPercent", 15, 0, 25);
         d.nightCap = bounded(tag, "nightCap", 16, 0, 32);
         d.respawnEarlyCap = bounded(tag, "respawnEarlyCap", 8, 1, 20);
@@ -129,6 +132,7 @@ public final class WaveData extends SavedData {
         tag.putInt("defenseMapX", defenseMapX);
         tag.putInt("defenseMapY", defenseMapY);
         tag.putInt("defenseMapZ", defenseMapZ);
+        for (int i = 0; i < turretLevels.length; i++) tag.putInt("turretLevel" + i, turretLevels[i]);
         tag.putInt("earlyBonusThroughWave", earlyBonusThroughWave);
         tag.putInt("economyVersion", 1);
         tag.putInt("respawns", respawns); tag.putInt("lastGrantWave", lastGrantWave);
@@ -174,6 +178,7 @@ public final class WaveData extends SavedData {
         eliminated.clear();
         pendingRespawn.clear();
         teamMembers.clear();
+        Arrays.fill(turretLevels, 0);
         accounts.clear();
         setDirty();
     }
@@ -184,6 +189,8 @@ public final class WaveData extends SavedData {
         setDirty();
     }
     public boolean buy(UUID id, int product) {
+        if (product == ShopRules.TURRET_ID || product == ShopRules.TURRET_UPGRADE_ID
+                || product == ShopRules.TURRET_REPAIR_ID) return false;
         ShopRules.Product item = ShopRules.product(product);
         if (item == null || wave < item.unlockWave() || eliminated.contains(id)) return false;
         Account a = account(id);

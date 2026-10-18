@@ -38,7 +38,8 @@ public final class ClientVisuals {
     private static final KeyMapping SHOP = new KeyMapping("key.endlessdefense.shop", InputConstants.Type.KEYSYM,
             GLFW.GLFW_KEY_K, "key.categories.endlessdefense");
     private static EndlessDefense.StatusPacket status = new EndlessDefense.StatusPacket(
-            0, 0, 0, -1, false, 0, 0, 0, "", false, 4, 100, 100, 2, 0, 15, 0,
+            0, 0, 0, -1, false, 0, 0, 0, "", false, 4, 100, 100, 2, 0, 15,
+            1, false, new int[ShopRules.MAX_TURRETS], 0, 0,
             new int[ShopRules.UPGRADE_IDS.length], new int[ShopRules.NAMES.length], 0, false, 0, false);
 
     public static void accept(EndlessDefense.StatusPacket newStatus) { status = newStatus; }
@@ -61,7 +62,8 @@ public final class ClientVisuals {
                     Minecraft mc = Minecraft.getInstance();
                     if (mc.player == null || mc.options.hideGui) return;
                     int x = 8, y = 8;
-                    graphics.fill(x - 4, y - 4, x + 285, y + 62 + status.upgrades()[6] * 11, 0x990A1119);
+                    graphics.fill(x - 4, y - 4, x + (status.defenseWorld() ? 395 : 285),
+                            y + 62 + status.upgrades()[6] * 11, 0x990A1119);
                     graphics.drawString(mc.font, "Endless Defense  |  웨이브 " + status.wave()
                             + "  최고 " + status.highest(), x, y, 0xFFD480, true);
                     String state = status.phase() == 3 ? "게임 오버 · 종료 투표 가능"
@@ -69,7 +71,9 @@ public final class ClientVisuals {
                             : status.phase() == 1 ? status.countdown() > 0 ? "다음 웨이브 " + status.countdown() + "초" : "다음 웨이브 대기 중"
                             : "시작 준비 · " + status.ready() + "/" + status.total() + "명";
                     graphics.drawString(mc.font, state, x, y + 11, 0xFFFFFF, true);
-                    graphics.drawString(mc.font, "노드 " + status.coins() + "  ·  G 준비  H 상태  K 상점", x, y + 22, 0xAAAAAA, true);
+                    graphics.drawString(mc.font, "노드 " + status.coins() + "  ·  G 준비  H 상태  K 상점"
+                            + (status.defenseWorld() ? "  ·  포탑 " + ShopRules.turretCount(status.turretLevels()) + "/4" : ""),
+                            x, y + 22, 0xAAAAAA, true);
                     graphics.drawString(mc.font, (status.phase() == 1 ? "다음 웨이브 팀 부활 " : "팀 부활 ")
                                     + status.respawns() + "회" + (status.night() ? "  ·  야간 웨이브" : "")
                                     + (status.surrenderVotes() > 0 ? "  ·  종료 " + status.surrenderVotes() + "/" + status.total() : ""),
@@ -150,6 +154,9 @@ public final class ClientVisuals {
                     : status.phase() == 2 ? "남은 적: " + status.remaining()
                     : status.phase() == 1 ? "다음 웨이브 대기 중" : "준비 인원: " + status.ready() + "/" + status.total(), x, y + 14, 0xFFFFFF, true);
             graphics.drawString(font, "보유 노드: " + status.coins(), x, y + 25, 0xFFFFAA, true);
+            if (status.defenseWorld()) graphics.drawString(font,
+                    "팀 포탑 " + ShopRules.turretCount(status.turretLevels()) + "/4 · 수리 필요 " + status.brokenTurrets(),
+                    x, y - 12, 0x99DDFF, true);
             graphics.drawString(font, (status.phase() == 1 ? "다음 웨이브 팀 부활: " : "팀 공유 부활: ")
                             + status.respawns() + "회" + (status.night() ? " · 야간" : ""),
                     x, y + 36, 0xFFCCAA, true);
@@ -219,7 +226,7 @@ public final class ClientVisuals {
             previousItem = addRenderableWidget(Button.builder(Component.literal("‹"), button ->
                     itemPage = Math.max(0, itemPage - 1)).bounds(left - 22, top + 169, 20, 20).build());
             nextItem = addRenderableWidget(Button.builder(Component.literal("›"), button ->
-                    itemPage = Math.min((CATALOGS[tab].length - 1) / visibleCards, itemPage + 1))
+                    itemPage = Math.min((catalog().length - 1) / visibleCards, itemPage + 1))
                     .bounds(left + visibleCards * cardWidth + 2, top + 169, 20, 20).build());
             addRenderableWidget(Button.builder(Component.literal("돌아가기"), button -> onClose())
                     .bounds(width - 65, top, 58, 18).build());
@@ -234,7 +241,24 @@ public final class ClientVisuals {
 
         private int itemId(int slot) {
             int index = itemPage * visibleCards + slot;
-            return slot < visibleCards && index < CATALOGS[tab].length ? CATALOGS[tab][index] : -1;
+            int[] entries = catalog();
+            return slot < visibleCards && index < entries.length ? entries[index] : -1;
+        }
+
+        private int[] catalog() {
+            return java.util.Arrays.stream(CATALOGS[tab])
+                    .filter(id -> status.defenseWorld() || id < ShopRules.TURRET_ID)
+                    .boxed().sorted(java.util.Comparator.<Integer>comparingLong(id -> {
+                        long value = price(id);
+                        return value < 0 ? Long.MAX_VALUE : value;
+                    }).thenComparingInt(id -> id)).mapToInt(Integer::intValue).toArray();
+        }
+
+        private long price(int id) {
+            if (id == ShopRules.TURRET_UPGRADE_ID)
+                return ShopRules.turretUpgradeCost(ShopRules.lowestTurretLevel(status.turretLevels()));
+            int slot = ShopRules.upgradeSlot(id);
+            return ShopRules.cost(id, slot >= 0 ? status.upgrades()[slot] : 0);
         }
 
         private static ItemStack icon(int id) {
@@ -293,11 +317,12 @@ public final class ClientVisuals {
 
         private void renderShop(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
             upgradeOffset = Math.min(upgradeOffset, ((ShopRules.UPGRADE_IDS.length - 1) / visibleCards) * visibleCards);
-            itemPage = Math.min(itemPage, (CATALOGS[tab].length - 1) / visibleCards);
+            int catalogLength = catalog().length;
+            itemPage = Math.min(itemPage, (catalogLength - 1) / visibleCards);
             previousUpgrade.active = upgradeOffset > 0;
             nextUpgrade.active = upgradeOffset + visibleCards < ShopRules.UPGRADE_IDS.length;
             previousItem.active = itemPage > 0;
-            nextItem.active = (itemPage + 1) * visibleCards < CATALOGS[tab].length;
+            nextItem.active = (itemPage + 1) * visibleCards < catalogLength;
             for (int i = 0; i < TABS.length; i++)
                 tabButtons[i].setMessage(Component.literal((tab == i ? "● " : "") + TABS[i].title()));
             for (int i = 0; i < upgradeButtons.length; i++) {
@@ -318,7 +343,7 @@ public final class ClientVisuals {
             graphics.fill(8 + tab * ((width - 16) / TABS.length), top + 132,
                     8 + (tab + 1) * ((width - 16) / TABS.length) - 2, top + 134, 0xFFFFD480);
             graphics.drawCenteredString(font, "가격 낮은 순 · " + (itemPage + 1) + "/"
-                    + ((CATALOGS[tab].length - 1) / visibleCards + 1), width / 2, top + 137, 0xAAAAAA);
+                    + ((catalogLength - 1) / visibleCards + 1), width / 2, top + 137, 0xAAAAAA);
             for (int i = 0; i < visibleCards; i++) {
                 int id = itemId(i);
                 if (id >= 0) drawCard(graphics, id, left + i * cardWidth, top + 147, false);
@@ -332,6 +357,14 @@ public final class ClientVisuals {
                     int slot = ShopRules.upgradeSlot(id);
                     String detail = slot >= 0 ? ShopRules.nextEffect(id, status.upgrades()[slot])
                             : ShopRules.product(id).description();
+                    if (id == ShopRules.TURRET_ID) detail += " · 공격 4 · 사거리 25 · 32틱마다 발사";
+                    if (id == ShopRules.TURRET_UPGRADE_ID) {
+                        int next = ShopRules.lowestTurretLevel(status.turretLevels()) + 1;
+                        if (next <= ShopRules.MAX_TURRET_LEVEL)
+                            detail += " · 다음 " + next + "단계: 공격 " + (int) ShopRules.turretDamage(next)
+                                    + " · 사거리 " + ShopRules.turretRange(next)
+                                    + " · " + ShopRules.turretInterval(next) + "틱마다 발사";
+                    }
                     graphics.renderTooltip(font, Component.literal(ShopRules.NAMES[id] + " · " + detail), mouseX, mouseY);
                     break;
                 }
@@ -340,19 +373,23 @@ public final class ClientVisuals {
 
         private void updatePurchaseButton(Button button, int id) {
             ShopRules.Product product = ShopRules.product(id);
-            int slot = ShopRules.upgradeSlot(id);
-            long price = ShopRules.cost(id, slot >= 0 ? status.upgrades()[slot] : 0);
+            long price = price(id);
             int stock = product.perWave() > 0 ? product.perWave() - status.stock()[id] : 1;
             boolean unlocked = status.wave() >= product.unlockWave();
-            button.active = unlocked && price >= 0 && status.coins() >= price && stock > 0;
-            button.setMessage(Component.literal(price < 0 ? "최대" : !unlocked ? "잠김" : stock == 0 ? "품절" : "구매"));
+            boolean turret = id >= ShopRules.TURRET_ID && id <= ShopRules.TURRET_REPAIR_ID;
+            boolean available = id == ShopRules.TURRET_ID ? ShopRules.turretCount(status.turretLevels()) < ShopRules.MAX_TURRETS
+                    : id == ShopRules.TURRET_UPGRADE_ID ? price >= 0 : id != ShopRules.TURRET_REPAIR_ID || status.brokenTurrets() > 0;
+            button.active = unlocked && price >= 0 && status.coins() >= price && stock > 0
+                    && (!turret || status.defenseWorld() && available);
+            button.setMessage(Component.literal(!unlocked ? "잠김" : turret && !available ? "불가"
+                    : price < 0 ? "최대" : stock == 0 ? "품절" : "구매"));
         }
 
         private void drawCard(GuiGraphics graphics, int id, int x, int y, boolean upgrade) {
             ShopRules.Product product = ShopRules.product(id);
             int slot = ShopRules.upgradeSlot(id);
             int level = slot >= 0 ? status.upgrades()[slot] : 0;
-            long price = ShopRules.cost(id, level);
+            long price = price(id);
             int textColor = status.wave() < product.unlockWave() ? 0x888888 : 0xFFFFFF;
             graphics.fill(x + 2, y, x + cardWidth - 2, y + (upgrade ? 52 : 49), 0xBB15232E);
             graphics.drawCenteredString(font, font.plainSubstrByWidth(product.name(), cardWidth - 8),
@@ -361,25 +398,32 @@ public final class ClientVisuals {
             if (upgrade)
                 graphics.drawCenteredString(font, "레벨 " + level + "/" + ShopRules.maxLevel(id),
                         x + cardWidth / 2, y + 33, 0x99DDFF);
+            else if (id == ShopRules.TURRET_ID || id == ShopRules.TURRET_UPGRADE_ID || id == ShopRules.TURRET_REPAIR_ID)
+                graphics.drawCenteredString(font, "포탑 " + ShopRules.turretCount(status.turretLevels()) + "/4"
+                                + (status.brokenTurrets() > 0 ? " · 파손 " + status.brokenTurrets() : ""),
+                        x + cardWidth / 2, y + 30, 0x99DDFF);
             else if (product.perWave() > 0)
                 graphics.drawCenteredString(font, "재고 " + Math.max(0, product.perWave() - status.stock()[id]),
                         x + cardWidth / 2, y + 30, 0xAAAAAA);
-            graphics.drawCenteredString(font, price < 0 ? "최대 레벨" : price + " 노드",
+            String priceLabel = id == ShopRules.TURRET_UPGRADE_ID && price < 0
+                    && ShopRules.turretCount(status.turretLevels()) == 0 ? "포탑 필요"
+                    : price < 0 ? "최대 레벨" : price + " 노드";
+            graphics.drawCenteredString(font, priceLabel,
                     x + cardWidth / 2, y + (upgrade ? 44 : 41), 0xFFD480);
         }
     }
 
     private static final class AdminScreen extends Screen {
-        private static final String[] LABELS = {"기본 적 수", "체력 %", "공격력 %", "탐지 단계", "추가 방어력", "장비 확률 %"};
-        private static final int[] STEPS = {1, 25, 25, 1, 1, 5};
-        private static final int[] MIN = {1, 25, 25, 1, 0, 0};
-        private static final int[] MAX = {128, 500, 500, 5, 20, 100};
+        private static final String[] LABELS = {"기본 적 수", "체력 %", "공격력 %", "탐지 단계", "추가 방어력", "장비 확률 %", "마력 주입 몹 %"};
+        private static final int[] STEPS = {1, 25, 25, 1, 1, 5, 1};
+        private static final int[] MIN = {1, 25, 25, 1, 0, 0, 0};
+        private static final int[] MAX = {128, 500, 500, 5, 20, 100, 100};
 
         private AdminScreen() { super(Component.literal("Endless Defense 관리자 설정")); }
 
         @Override protected void init() {
             if (!status.canConfigure()) { onClose(); return; }
-            int y0 = height / 2 - 75;
+            int y0 = height / 2 - 80;
             for (int i = 0; i < LABELS.length; i++) {
                 final int option = i;
                 final int y = y0 + i * 24;
@@ -389,13 +433,13 @@ public final class ClientVisuals {
                         .bounds(width / 2 + 82, y, 22, 20).build());
             }
             addRenderableWidget(Button.builder(Component.literal("돌아가기"), button -> onClose())
-                    .bounds(width / 2 - 80, height / 2 + 80, 160, 20).build());
+                    .bounds(width / 2 - 80, height / 2 + 87, 160, 20).build());
         }
 
         private void change(int option, int delta) {
             if (!status.canConfigure()) return;
             int[] values = {status.baseMobs(), status.healthPercent(), status.damagePercent(),
-                    status.awareness(), status.armorBonus(), status.gearChance()};
+                    status.awareness(), status.armorBonus(), status.gearChance(), status.infuserChance()};
             int value = Math.max(MIN[option], Math.min(MAX[option], values[option] + delta));
             if (value != values[option]) EndlessDefense.requestConfig(option, value);
         }
@@ -404,15 +448,15 @@ public final class ClientVisuals {
 
         @Override public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
             super.render(graphics, mouseX, mouseY, partialTick);
-            graphics.drawCenteredString(font, title, width / 2, height / 2 - 88, 0xFFD480);
+            graphics.drawCenteredString(font, title, width / 2, height / 2 - 96, 0xFFD480);
             int[] values = {status.baseMobs(), status.healthPercent(), status.damagePercent(),
-                    status.awareness(), status.armorBonus(), status.gearChance()};
-            int y0 = height / 2 - 75;
+                    status.awareness(), status.armorBonus(), status.gearChance(), status.infuserChance()};
+            int y0 = height / 2 - 80;
             for (int i = 0; i < LABELS.length; i++) {
                 graphics.drawString(font, LABELS[i] + ": " + values[i], width / 2 - 105, y0 + i * 24 + 6,
                         0xFFFFFF, true);
             }
-            graphics.drawCenteredString(font, "변경 사항은 다음 웨이브부터 적용", width / 2, height / 2 + 61, 0xAAAAAA);
+            graphics.drawCenteredString(font, "변경 사항은 다음 웨이브부터 적용", width / 2, height / 2 + 74, 0xAAAAAA);
         }
     }
 

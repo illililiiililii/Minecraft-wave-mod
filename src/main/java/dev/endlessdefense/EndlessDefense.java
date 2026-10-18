@@ -47,6 +47,7 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
+import net.minecraftforge.event.entity.living.LivingDropsEvent;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.network.CustomPayloadEvent;
@@ -69,7 +70,7 @@ public final class EndlessDefense {
     public static final String MODID = "endlessdefense";
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final SimpleChannel CHANNEL = ChannelBuilder.named(ResourceLocation.fromNamespaceAndPath(MODID, "main"))
-            .networkProtocolVersion(5).simpleChannel();
+            .networkProtocolVersion(6).simpleChannel();
     private static final Map<MinecraftServer, Session> SESSIONS = new WeakHashMap<>();
 
     public EndlessDefense(FMLJavaModLoadingContext context) {
@@ -96,6 +97,10 @@ public final class EndlessDefense {
                     buffer.writeVarInt(message.awareness);
                     buffer.writeVarInt(message.armorBonus);
                     buffer.writeVarInt(message.gearChance);
+                    buffer.writeVarInt(message.infuserChance);
+                    buffer.writeBoolean(message.defenseWorld);
+                    for (int level : message.turretLevels) buffer.writeVarInt(level);
+                    buffer.writeVarInt(message.brokenTurrets);
                     buffer.writeVarLong(message.coins);
                     for (int level : message.upgrades) buffer.writeVarInt(level);
                     for (int count : message.stock) buffer.writeVarInt(count);
@@ -107,7 +112,8 @@ public final class EndlessDefense {
                 .decoder(buffer -> new StatusPacket(buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(),
                         buffer.readBoolean(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(), buffer.readUtf(2048),
                         buffer.readBoolean(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(),
-                        buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarLong(),
+                        buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(),
+                        buffer.readBoolean(), readTurrets(buffer), buffer.readVarInt(), buffer.readVarLong(),
                         readUpgrades(buffer),
                         readStock(buffer), buffer.readVarInt(), buffer.readBoolean(), buffer.readVarInt(), buffer.readBoolean()))
                 .consumerMainThread(StatusPacket::handle).add();
@@ -176,6 +182,13 @@ public final class EndlessDefense {
             ServerPlayer player = context.getSender();
             if (player == null || message.product < 0 || message.product >= ShopRules.NAMES.length) return;
             WaveData data = WaveData.get(player.server);
+            if (message.product == ShopRules.TURRET_ID || message.product == ShopRules.TURRET_UPGRADE_ID
+                    || message.product == ShopRules.TURRET_REPAIR_ID) {
+                player.sendSystemMessage(Component.literal("[Endless Defense] "
+                        + TurretSystem.purchase(player, data, message.product)));
+                sync(player.server);
+                return;
+            }
             if (!data.buy(player.getUUID(), message.product)) {
                 player.sendSystemMessage(Component.literal("[Endless Defense] 노드가 부족하거나 해금·재고·레벨 조건을 충족하지 못했습니다."));
                 sync(player.server);
@@ -194,7 +207,7 @@ public final class EndlessDefense {
         private static void handle(ConfigPacket message, CustomPayloadEvent.Context context) {
             ServerPlayer player = context.getSender();
             if (player == null || !player.hasPermissions(2)) return;
-            String[] names = {"count", "health", "damage", "awareness", "armor", "gear"};
+            String[] names = {"count", "health", "damage", "awareness", "armor", "gear", "infuser"};
             if (message.option < 0 || message.option >= names.length) return;
             if (!setSetting(WaveData.get(player.server), names[message.option], message.value)) return;
             player.sendSystemMessage(Component.literal("[Endless Defense] 설정 저장: " + names[message.option]
@@ -205,9 +218,11 @@ public final class EndlessDefense {
 
     public record StatusPacket(int wave, int highest, int phase, int countdown, boolean selfReady, int ready, int total,
                                int remaining, String roster, boolean canConfigure, int baseMobs, int healthPercent,
-                               int damagePercent, int awareness, int armorBonus, int gearChance, long coins, int[] upgrades,
+                               int damagePercent, int awareness, int armorBonus, int gearChance, int infuserChance,
+                               boolean defenseWorld, int[] turretLevels, int brokenTurrets, long coins, int[] upgrades,
                                int[] stock, int respawns, boolean night, int surrenderVotes, boolean selfSurrender) {
         public StatusPacket {
+            turretLevels = java.util.Arrays.copyOf(turretLevels, ShopRules.MAX_TURRETS);
             upgrades = java.util.Arrays.copyOf(upgrades, ShopRules.UPGRADE_IDS.length);
             stock = java.util.Arrays.copyOf(stock, ShopRules.NAMES.length);
         }
@@ -221,6 +236,12 @@ public final class EndlessDefense {
         int[] upgrades = new int[ShopRules.UPGRADE_IDS.length];
         for (int i = 0; i < upgrades.length; i++) upgrades[i] = buffer.readVarInt();
         return upgrades;
+    }
+
+    private static int[] readTurrets(net.minecraft.network.FriendlyByteBuf buffer) {
+        int[] levels = new int[ShopRules.MAX_TURRETS];
+        for (int i = 0; i < levels.length; i++) levels[i] = buffer.readVarInt();
+        return levels;
     }
 
     private static int[] readStock(net.minecraft.network.FriendlyByteBuf buffer) {
@@ -260,7 +281,10 @@ public final class EndlessDefense {
                     game.phase == Phase.WAITING && game.waitSeconds <= 10 ? game.waitSeconds : -1,
                     game.ready.contains(player.getUUID()), game.ready.size(), players.size(), game.mobs.size(), roster,
                     player.hasPermissions(2), data.baseMobs, data.healthPercent, data.damagePercent,
-                    data.awareness, data.armorBonus, data.gearChance, account.coins, account.levels.clone(),
+                    data.awareness, data.armorBonus, data.gearChance, data.infuserChancePercent,
+                    DefenseMap.selected(server.overworld()), data.turretLevels.clone(),
+                    TurretSystem.brokenCount(server.overworld(), data),
+                    account.coins, account.levels.clone(),
                     account.stockWave == data.wave ? account.stock.clone() : new int[ShopRules.NAMES.length],
                     shownRespawns, game.night, game.surrenderVotes.size(), game.surrenderVotes.contains(player.getUUID())),
                     PacketDistributor.PLAYER.with(player));
@@ -336,6 +360,7 @@ public final class EndlessDefense {
         game.mobs.clear(); game.bossMobs.clear(); game.kills.clear(); game.infusions.clear(); game.ready.clear(); game.surrenderVotes.clear();
         game.night = false;
         game.phase = Phase.LOBBY;
+        TurretSystem.deactivate(server, data);
         data.resetRun();
         for (ServerPlayer player : server.getPlayerList().getPlayers()) data.restoreSurvival.remove(player.getUUID());
         data.setDirty();
@@ -786,6 +811,10 @@ public final class EndlessDefense {
         }
     }
 
+    @SubscribeEvent public void onDrops(LivingDropsEvent event) {
+        TurretSystem.collectDrops(event);
+    }
+
     @SubscribeEvent public void onRespawn(PlayerEvent.PlayerRespawnEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         WaveData data = WaveData.get(player.server);
@@ -845,10 +874,12 @@ public final class EndlessDefense {
     }
 
     @SubscribeEvent public void onServerTick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END || event.getServer().getTickCount() % 20 != 0) return;
+        if (event.phase != TickEvent.Phase.END) return;
         MinecraftServer server = event.getServer();
-        DefenseMap.ensure(server);
         Session game = session(server);
+        if (game.phase == Phase.ACTIVE) TurretSystem.tick(server, WaveData.get(server), game.mobs);
+        if (server.getTickCount() % 20 != 0) return;
+        DefenseMap.ensure(server);
         for (ServerPlayer player : server.getPlayerList().getPlayers())
             applyPendingInfusions(player, WaveData.get(server));
         if (server.getTickCount() % 200 == 0)
@@ -929,7 +960,7 @@ public final class EndlessDefense {
                             WaveData d = WaveData.get(ctx.getSource().getServer());
                             ctx.getSource().sendSuccess(() -> Component.literal("count=" + d.baseMobs + " health=" + d.healthPercent
                                     + " damage=" + d.damagePercent + " awareness=" + d.awareness + " armor=" + d.armorBonus
-                                    + " gear=" + d.gearChance), false);
+                                    + " gear=" + d.gearChance + " infuser=" + d.infuserChancePercent), false);
                             return 1;
                         }))
                         .then(setting("count", 1, 128))
@@ -937,7 +968,8 @@ public final class EndlessDefense {
                         .then(setting("damage", 25, 500))
                         .then(setting("awareness", 1, 5))
                         .then(setting("armor", 0, 20))
-                        .then(setting("gear", 0, 100)))
+                        .then(setting("gear", 0, 100))
+                        .then(setting("infuser", 0, 100)))
                 .then(Commands.literal("balance").requires(source -> source.hasPermission(2))
                         .then(Commands.literal("show").executes(ctx -> {
                             WaveData d = WaveData.get(ctx.getSource().getServer());
@@ -960,7 +992,7 @@ public final class EndlessDefense {
                         .then(setting("respawnCap", 1, 20)).then(setting("lateWave", 10, 200))
                         .then(setting("restMinStep", 0, 10)).then(setting("restMaxStep", 0, 15))
                         .then(setting("restMaxCap", 60, 180)).then(setting("earlyBonus", 0, 1000))
-                        .then(setting("infuser", 0, 10)).then(setting("enchantDrop", 0, 10)));
+                        .then(setting("infuser", 0, 100)).then(setting("enchantDrop", 0, 100)));
         event.getDispatcher().register(root);
     }
 
@@ -1000,7 +1032,7 @@ public final class EndlessDefense {
             case "restMaxStep" -> value >= 0 && value <= 15;
             case "restMaxCap" -> value >= 60 && value <= 180;
             case "earlyBonus" -> value >= 0 && value <= 1000;
-            case "infuser", "enchantDrop" -> value >= 0 && value <= 10;
+            case "infuser", "enchantDrop" -> value >= 0 && value <= 100;
             default -> false;
         };
         if (!valid) return false;
