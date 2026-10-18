@@ -8,6 +8,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.monster.Monster;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LadderBlock;
@@ -26,6 +27,18 @@ final class DefenseMap {
     static boolean selected(ServerLevel level) {
         return level.dimensionTypeRegistration().unwrapKey()
                 .map(key -> key.location().equals(TYPE)).orElse(false);
+    }
+
+    static int clearCourtyardDrops(ServerLevel level, WaveData data) {
+        if (!selected(level) || !data.defenseMapBuilt) return 0;
+        int count = 0;
+        AABB courtyard = new AABB(data.defenseMapX - 18, data.defenseMapY - 2, data.defenseMapZ - 18,
+                data.defenseMapX + 19, data.defenseMapY + 12, data.defenseMapZ + 19);
+        for (ItemEntity item : level.getEntitiesOfClass(ItemEntity.class, courtyard)) {
+            item.discard();
+            count++;
+        }
+        return count;
     }
 
     static void ensure(MinecraftServer server) {

@@ -102,13 +102,13 @@ final class TurretSystem {
             int levelValue = data.turretLevels[i];
             if (levelValue <= 0) continue;
             int interval = ShopRules.turretInterval(levelValue,
-                    data.number("turretInterval", 80), data.number("turretIntervalStep", 12));
+                    data.number("turretInterval", 60), data.number("turretIntervalStep", 12));
             if ((tick + i * 7) % interval != 0) continue;
             BlockPos base = base(data, i);
             if (!level.isLoaded(base) || !operational(level, base)) continue;
-            Vec3 muzzle = Vec3.atCenterOf(base.above(2)).add(0, 0.65, 0);
+            Vec3 muzzle = Vec3.atCenterOf(base.above(2)).add(0, 0.7, 0);
             int range = ShopRules.turretRange(levelValue,
-                    data.number("turretRange", 14), data.number("turretRangeStep", 3));
+                    data.number("turretRange", 30), data.number("turretRangeStep", 3));
             Monster target = null;
             double nearest = (double) range * range;
             for (Monster mob : level.getEntitiesOfClass(Monster.class, new AABB(base).inflate(range))) {
@@ -116,7 +116,7 @@ final class TurretSystem {
                 Vec3 eye = mob.getEyePosition();
                 double distance = muzzle.distanceToSqr(eye);
                 if (distance >= nearest || level.clip(new ClipContext(muzzle, eye,
-                        ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE,
+                        ClipContext.Block.VISUAL, ClipContext.Fluid.NONE,
                         CollisionContext.empty())).getType() != HitResult.Type.MISS) continue;
                 target = mob;
                 nearest = distance;

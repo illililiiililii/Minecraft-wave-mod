@@ -23,8 +23,9 @@ public final class WaveData extends SavedData {
     public boolean waveInProgress;
     public boolean defenseMapBuilt;
     public boolean coreInitialized;
+    public boolean coreDamagedThisWave;
     public int defenseMapX, defenseMapY, defenseMapZ;
-    public int coreTier = 1, coreHp = 100;
+    public int coreTier = 1, coreHp = 200;
     public final int[] turretLevels = new int[ShopRules.MAX_TURRETS];
     public int earlyBonusThroughWave;
     public int respawns, lastGrantWave;
@@ -54,11 +55,12 @@ public final class WaveData extends SavedData {
         d.waveInProgress = tag.getBoolean("waveInProgress");
         d.defenseMapBuilt = tag.getBoolean("defenseMapBuilt");
         d.coreInitialized = tag.getBoolean("coreInitialized");
+        d.coreDamagedThisWave = tag.getBoolean("coreDamagedThisWave");
         d.defenseMapX = tag.getInt("defenseMapX");
         d.defenseMapY = tag.getInt("defenseMapY");
         d.defenseMapZ = tag.getInt("defenseMapZ");
         d.coreTier = bounded(tag, "coreTier", 1, 1, Integer.MAX_VALUE);
-        d.coreHp = Math.max(0, tag.contains("coreHp") ? tag.getInt("coreHp") : 100);
+        d.coreHp = Math.max(0, tag.contains("coreHp") ? tag.getInt("coreHp") : 200);
         for (int i = 0; i < d.turretLevels.length; i++)
             d.turretLevels[i] = Math.max(0, tag.getInt("turretLevel" + i));
         d.earlyBonusThroughWave = Math.max(0, Math.min(30, tag.getInt("earlyBonusThroughWave")));
@@ -121,6 +123,11 @@ public final class WaveData extends SavedData {
             if (value >= entry.min() && value <= entry.max())
                 d.numericSettings.put(entry.key(), value);
         }
+        if (tag.getInt("coreBalanceVersion") < 1 && d.coreInitialized && !d.gameOver && d.coreHp > 0) {
+            d.coreHp = (int) Math.min(BaseSystem.maxHp(d), (long) d.coreHp + 100);
+            if (d.waveInProgress) d.coreDamagedThisWave = true;
+            d.setDirty();
+        }
         return d;
     }
     private static int bounded(CompoundTag tag, String key, int fallback, int min, int max) {
@@ -143,6 +150,8 @@ public final class WaveData extends SavedData {
         tag.putBoolean("waveInProgress", waveInProgress);
         tag.putBoolean("defenseMapBuilt", defenseMapBuilt);
         tag.putBoolean("coreInitialized", coreInitialized);
+        tag.putBoolean("coreDamagedThisWave", coreDamagedThisWave);
+        tag.putInt("coreBalanceVersion", 1);
         tag.putInt("defenseMapX", defenseMapX);
         tag.putInt("defenseMapY", defenseMapY);
         tag.putInt("defenseMapZ", defenseMapZ);
@@ -212,7 +221,8 @@ public final class WaveData extends SavedData {
         teamMembers.clear();
         Arrays.fill(turretLevels, 0);
         coreTier = 1;
-        coreHp = 100;
+        coreHp = 200;
+        coreDamagedThisWave = false;
         coreInitialized = false;
         accounts.clear();
         setDirty();

@@ -17,7 +17,7 @@ final class BaseSystem {
     private BaseSystem() {}
 
     static int maxHp(WaveData data) {
-        long hp = data.number("coreBaseHp", 100)
+        long hp = data.number("coreBaseHp", 200)
                 + Math.max(0L, (long) data.coreTier - 1) * data.number("coreHpStep", 50);
         return (int) Math.min(Integer.MAX_VALUE, hp);
     }
@@ -103,6 +103,9 @@ final class BaseSystem {
         for (UUID id : waveMobs) {
             Entity entity = level.getEntity(id);
             if (!(entity instanceof Monster mob) || !mob.isAlive()) continue;
+            int radius = data.number("coreAggroRadius", 12);
+            if (mob.getTarget() instanceof ServerPlayer player && player.isAlive()
+                    && mob.distanceToSqr(player) < (double) radius * radius) continue;
             double distance = mob.distanceToSqr(core.getX() + .5, core.getY() + .5, core.getZ() + .5);
             if (distance <= 10 && Math.abs(mob.getY() - core.getY()) < 3) {
                 damage += mob.getTags().contains("endlessdefense_boss") ? data.number("coreBossDamage", 4)
@@ -111,12 +114,10 @@ final class BaseSystem {
                 continue;
             }
             if (distance > 48 * 48) continue;
-            if ((mob instanceof ModMobs.SiegeBrute || mob instanceof ModMobs.DreadKnight)
-                    && (mob.getTarget() == null || mob.distanceToSqr(mob.getTarget()) > 12 * 12))
-                mob.getNavigation().moveTo(core.getX() + .5, core.getY(), core.getZ() + .5, 1.0);
             if (breachNow && broken < data.number("wallBreakCap", 2) && breachWall(level, data, mob)) broken++;
         }
         if (damage > 0) {
+            data.coreDamagedThisWave = true;
             data.coreHp = Math.max(0, data.coreHp - Math.min(data.number("coreDamageCap", 12), damage));
             data.setDirty();
             if (data.coreHp == 0) {
@@ -125,6 +126,34 @@ final class BaseSystem {
             }
         }
         return false;
+    }
+
+    /** Override vanilla long-distance player aggro for wave units in the defense courtyard. */
+    static void tickTargets(MinecraftServer server, WaveData data, Set<UUID> waveMobs) {
+        ServerLevel level = server.overworld();
+        if (!DefenseMap.selected(level) || !data.defenseMapBuilt) return;
+        BlockPos core = DefenseMap.core(data);
+        int radius = data.number("coreAggroRadius", 12);
+        boolean route = server.getTickCount() % 20 == 0;
+        for (UUID id : waveMobs) {
+            Entity entity = level.getEntity(id);
+            if (!(entity instanceof Monster mob) || !mob.isAlive()) continue;
+            ServerPlayer nearby = null;
+            double best = (double) radius * radius;
+            for (ServerPlayer player : level.players()) {
+                if (!player.isAlive() || player.gameMode.getGameModeForPlayer() == GameType.SPECTATOR
+                        || data.eliminated.contains(player.getUUID())) continue;
+                double distance = mob.distanceToSqr(player);
+                if (distance < best) { best = distance; nearby = player; }
+            }
+            if (nearby != null) {
+                if (mob.getTarget() != nearby) mob.setTarget(nearby);
+            } else {
+                if (mob.getTarget() != null) mob.setTarget(null);
+                if (route && mob.distanceToSqr(core.getX() + .5, core.getY() + .5, core.getZ() + .5) > 9)
+                    mob.getNavigation().moveTo(core.getX() + .5, core.getY(), core.getZ() + .5, 1.1);
+            }
+        }
     }
 
     private static boolean breachWall(ServerLevel level, WaveData data, Monster mob) {

@@ -38,9 +38,11 @@ public final class ClientVisuals {
             GLFW.GLFW_KEY_H, "key.categories.endlessdefense");
     private static final KeyMapping SHOP = new KeyMapping("key.endlessdefense.shop", InputConstants.Type.KEYSYM,
             GLFW.GLFW_KEY_K, "key.categories.endlessdefense");
+    private static final KeyMapping INFUSE = new KeyMapping("key.endlessdefense.infuse", InputConstants.Type.KEYSYM,
+            GLFW.GLFW_KEY_J, "key.categories.endlessdefense");
     private static EndlessDefense.StatusPacket status = new EndlessDefense.StatusPacket(
             0, 0, 0, -1, false, 0, 0, 0, "", false, 4, 100, 100, 2, 0, 15,
-            1, false, new int[ShopRules.MAX_TURRETS], 0, 0, 0, 0, 0,
+            1, false, new int[ShopRules.MAX_TURRETS], 0, 0, 0, 0, 0, 0,
             new int[ShopRules.UPGRADE_IDS.length], new int[ShopRules.NAMES.length],
             AdminSettings.defaults(), 0, false, 0, false);
 
@@ -50,6 +52,7 @@ public final class ClientVisuals {
         event.register(READY);
         event.register(PANEL);
         event.register(SHOP);
+        event.register(INFUSE);
     }
 
     @SubscribeEvent public static void renderers(EntityRenderersEvent.RegisterRenderers event) {
@@ -66,9 +69,10 @@ public final class ClientVisuals {
                 (graphics, tracker) -> {
                     Minecraft mc = Minecraft.getInstance();
                     if (mc.player == null || mc.options.hideGui) return;
-                    int x = 8, y = 8;
-                    graphics.fill(x - 4, y - 4, x + (status.defenseWorld() ? 395 : 285),
-                            y + 62 + Math.min(3, status.upgrades()[6]) * 11, 0x990A1119);
+                    int panelWidth = Math.min(312, mc.getWindow().getGuiScaledWidth() - 16);
+                    int x = mc.getWindow().getGuiScaledWidth() - panelWidth - 8, y = 8;
+                    graphics.fill(x - 4, y - 4, x + panelWidth,
+                            y + 72 + Math.min(3, status.upgrades()[6]) * 11, 0x990A1119);
                     graphics.drawString(mc.font, "Endless Defense  |  웨이브 " + status.wave()
                             + "  최고 " + status.highest(), x, y, 0xFFD480, true);
                     String state = status.phase() == 3 ? "게임 오버 · 종료 투표 가능"
@@ -76,27 +80,31 @@ public final class ClientVisuals {
                             : status.phase() == 1 ? status.countdown() > 0 ? "다음 웨이브 " + status.countdown() + "초" : "다음 웨이브 대기 중"
                             : "시작 준비 · " + status.ready() + "/" + status.total() + "명";
                     graphics.drawString(mc.font, state, x, y + 11, 0xFFFFFF, true);
-                    graphics.drawString(mc.font, "노드 " + status.coins() + "  ·  G 준비  H 상태  K 상점"
-                            + (status.defenseWorld() ? "  ·  포탑 " + ShopRules.turretCount(status.turretLevels()) + "/4" : ""),
+                    graphics.drawString(mc.font, "노드 " + status.coins() + " · G 준비  H 상태  K 상점  J 주입",
                             x, y + 22, 0xAAAAAA, true);
                     graphics.drawString(mc.font, (status.phase() == 1 ? "다음 웨이브 팀 부활 " : "팀 부활 ")
                                     + status.respawns() + "회" + (status.night() ? "  ·  야간 웨이브" : "")
-                                    + (status.defenseWorld() && status.phase() != 0 ? "  ·  핵심 " + status.coreHp() + "/" + status.coreMaxHp() : "")
                                     + (status.surrenderVotes() > 0 ? "  ·  종료 " + status.surrenderVotes() + "/" + status.total() : ""),
                             x, y + 33, 0xFFCCAA, true);
+                    if (status.defenseWorld()) graphics.drawString(mc.font,
+                            "핵심 " + status.coreHp() + "/" + status.coreMaxHp()
+                                    + " · 포탑 " + ShopRules.turretCount(status.turretLevels()) + "/4",
+                            x, y + 44, 0x99DDFF, true);
+                    graphics.drawString(mc.font, "마력 주입 " + status.pendingInfusions() + "회 · 주 손 장비 + J",
+                            x, y + 55, 0xBB99FF, true);
                     graphics.drawString(mc.font, status.phase() == 0 ? "H 메뉴에서 웨이브 포기 투표 가능" : "⚠ H 메뉴: 웨이브 포기 투표",
-                            x, y + 44, 0xFF8888, true);
+                            x, y + 66, 0xFF8888, true);
                     if (status.upgrades()[6] >= 1)
                         graphics.drawString(mc.font, "정찰: 다음 보스 " + (((status.wave() / setting(status, "bossInterval", 5)) + 1)
-                                * setting(status, "bossInterval", 5)) + "웨이브", x, y + 55, 0x99DDFF, true);
+                                * setting(status, "bossInterval", 5)) + "웨이브", x, y + 77, 0x99DDFF, true);
                     if (status.upgrades()[6] >= 2)
-                        graphics.drawString(mc.font, "빨강 보스 · 보라 주입자 · 금색 수호자 · 하늘색 추적자", x, y + 66, 0x99DDFF, true);
+                        graphics.drawString(mc.font, "빨강 보스 · 보라 주입자 · 금색 수호자", x, y + 88, 0x99DDFF, true);
                     if (status.upgrades()[6] >= 3)
                         graphics.drawString(mc.font, "현재 적 체력 배율 ×" + String.format(java.util.Locale.ROOT, "%.1f",
                                 BalanceRules.healthMultiplier(Math.max(1, status.wave()),
                                         AdminSettings.value(status.adminValues(), "healthGrowth"),
                                         AdminSettings.value(status.adminValues(), "healthCap"))),
-                                x, y + 77, 0x99DDFF, true);
+                                x, y + 99, 0x99DDFF, true);
                 });
     }
 
@@ -128,6 +136,7 @@ public final class ClientVisuals {
                 }
                 while (PANEL.consumeClick()) Minecraft.getInstance().setScreen(new StatusScreen());
                 while (SHOP.consumeClick()) Minecraft.getInstance().setScreen(new ShopScreen());
+                while (INFUSE.consumeClick()) EndlessDefense.requestInfusion();
             }
         }
     }
@@ -169,6 +178,8 @@ public final class ClientVisuals {
                     : status.phase() == 2 ? "남은 적: " + status.remaining()
                     : status.phase() == 1 ? "다음 웨이브 대기 중" : "준비 인원: " + status.ready() + "/" + status.total(), x, y + 14, 0xFFFFFF, true);
             graphics.drawString(font, "보유 노드: " + status.coins(), x, y + 25, 0xFFFFAA, true);
+            graphics.drawString(font, "마력 주입 " + status.pendingInfusions() + "회 · 주 손 장비 + J",
+                    x, y - 24, 0xBB99FF, true);
             if (status.defenseWorld()) graphics.drawString(font,
                     "기지 핵심 " + status.coreHp() + "/" + status.coreMaxHp() + " · 단계 " + status.coreTier()
                             + " · 포탑 " + ShopRules.turretCount(status.turretLevels()) + "/4",

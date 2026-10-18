@@ -48,6 +48,7 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
+import net.minecraftforge.event.entity.living.LivingChangeTargetEvent;
 import net.minecraftforge.event.entity.living.LivingDropsEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
@@ -73,7 +74,7 @@ public final class EndlessDefense {
     public static final String MODID = "endlessdefense";
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final SimpleChannel CHANNEL = ChannelBuilder.named(ResourceLocation.fromNamespaceAndPath(MODID, "main"))
-            .networkProtocolVersion(8).simpleChannel();
+            .networkProtocolVersion(9).simpleChannel();
     private static final Map<MinecraftServer, Session> SESSIONS = new WeakHashMap<>();
 
     public EndlessDefense(FMLJavaModLoadingContext context) {
@@ -108,6 +109,7 @@ public final class EndlessDefense {
                     buffer.writeVarInt(message.coreMaxHp);
                     buffer.writeVarInt(message.coreTier);
                     buffer.writeVarLong(message.coins);
+                    buffer.writeVarInt(message.pendingInfusions);
                     for (int level : message.upgrades) buffer.writeVarInt(level);
                     for (int count : message.stock) buffer.writeVarInt(count);
                     for (int value : message.adminValues) buffer.writeVarInt(value);
@@ -121,7 +123,7 @@ public final class EndlessDefense {
                         buffer.readBoolean(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(),
                         buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(),
                         buffer.readBoolean(), readTurrets(buffer), buffer.readVarInt(), buffer.readVarInt(),
-                        buffer.readVarInt(), buffer.readVarInt(), buffer.readVarLong(),
+                        buffer.readVarInt(), buffer.readVarInt(), buffer.readVarLong(), buffer.readVarInt(),
                         readUpgrades(buffer),
                         readStock(buffer), readAdminValues(buffer), buffer.readVarInt(), buffer.readBoolean(),
                         buffer.readVarInt(), buffer.readBoolean()))
@@ -138,6 +140,10 @@ public final class EndlessDefense {
                 .encoder((message, buffer) -> buffer.writeBoolean(message.vote))
                 .decoder(buffer -> new SurrenderPacket(buffer.readBoolean()))
                 .consumerMainThread(SurrenderPacket::handle).add();
+        CHANNEL.messageBuilder(InfusePacket.class, 5)
+                .encoder((message, buffer) -> {})
+                .decoder(buffer -> new InfusePacket())
+                .consumerMainThread(InfusePacket::handle).add();
         MinecraftForge.EVENT_BUS.register(this);
         LOGGER.info("Endless Survival Defense loaded");
     }
@@ -159,6 +165,16 @@ public final class EndlessDefense {
     }
     public static void requestSurrender(boolean vote) {
         CHANNEL.send(new SurrenderPacket(vote), PacketDistributor.SERVER.noArg());
+    }
+    public static void requestInfusion() {
+        CHANNEL.send(new InfusePacket(), PacketDistributor.SERVER.noArg());
+    }
+
+    private record InfusePacket() {
+        private static void handle(InfusePacket message, CustomPayloadEvent.Context context) {
+            ServerPlayer player = context.getSender();
+            if (player != null) applyPendingInfusion(player, WaveData.get(player.server));
+        }
     }
 
     private record SurrenderPacket(boolean vote) {
@@ -235,7 +251,7 @@ public final class EndlessDefense {
                                int remaining, String roster, boolean canConfigure, int baseMobs, int healthPercent,
                                int damagePercent, int awareness, int armorBonus, int gearChance, int infuserChance,
                                boolean defenseWorld, int[] turretLevels, int brokenTurrets,
-                               int coreHp, int coreMaxHp, int coreTier, long coins, int[] upgrades,
+                               int coreHp, int coreMaxHp, int coreTier, long coins, int pendingInfusions, int[] upgrades,
                                int[] stock, int[] adminValues, int respawns, boolean night, int surrenderVotes, boolean selfSurrender) {
         public StatusPacket {
             turretLevels = java.util.Arrays.copyOf(turretLevels, ShopRules.MAX_TURRETS);
@@ -310,7 +326,7 @@ public final class EndlessDefense {
                     DefenseMap.selected(server.overworld()) ? data.coreHp : 0,
                     DefenseMap.selected(server.overworld()) ? BaseSystem.maxHp(data) : 0,
                     DefenseMap.selected(server.overworld()) ? data.coreTier : 0,
-                    account.coins, account.levels.clone(),
+                    account.coins, account.pendingInfusions, account.levels.clone(),
                     account.stockWave == data.wave ? account.stock.clone() : new int[ShopRules.NAMES.length],
                     AdminSettings.values(data),
                     shownRespawns, game.night, game.surrenderVotes.size(), game.surrenderVotes.contains(player.getUUID())),
@@ -445,13 +461,28 @@ public final class EndlessDefense {
         WaveData data = WaveData.get(server);
         var players = participants(server, data);
         if (players.isEmpty()) return;
+        if (DefenseMap.selected(server.overworld()) && data.defenseMapBuilt) {
+            BlockPos core = DefenseMap.core(data);
+            for (int i = 0; i < players.size(); i++) {
+                ServerPlayer player = players.get(i);
+                if (player.serverLevel() == server.overworld()
+                        && player.distanceToSqr(core.getX() + .5, core.getY() + .5, core.getZ() + .5) <= 72 * 72) continue;
+                player.teleportTo(server.overworld(), core.getX() + 4.5 + i % 4,
+                        core.getY(), core.getZ() + 4.5 + i / 4 % 4,
+                        player.getYRot(), player.getXRot());
+                player.sendSystemMessage(Component.literal("웨이브 방어를 위해 거점으로 돌아왔습니다."));
+            }
+        }
         game.phase = Phase.ACTIVE;
         data.wave++;
         data.waveInProgress = true;
+        data.coreDamagedThisWave = false;
         if (!game.retrying) data.respawns = BalanceRules.ticketCap(data, data.wave, players.size());
         game.retrying = false;
         data.highestWave = Math.max(data.highestWave, data.wave);
         data.setDirty();
+        int clearedDrops = DefenseMap.clearCourtyardDrops(server.overworld(), data);
+        if (clearedDrops > 0) announce(server, "기지 안 바닥 아이템 " + clearedDrops + "개를 정리했습니다.");
         int bossInterval = data.number("bossInterval", 5);
         boolean bossWave = data.wave % bossInterval == 0;
         int bossTier = bossWave ? Math.max(1, data.wave / bossInterval) : 0;
@@ -695,14 +726,18 @@ public final class EndlessDefense {
                 + Math.max(0L, (long) game.bossTier - 1)
                 * data.number("bossRewardStep", 75) : 0;
         if (game.bossKilled) for (ServerPlayer player : participants(server, data)) data.award(player.getUUID(), bossReward);
+        long perfectReward = DefenseMap.selected(server.overworld()) && data.defenseMapBuilt && !data.coreDamagedThisWave
+                ? data.number("perfectDefenseBonus", 100)
+                + Math.max(0L, (long) wave - 1) * data.number("perfectDefenseStep", 10) : 0;
+        if (perfectReward > 0) for (ServerPlayer player : participants(server, data))
+            data.award(player.getUUID(), perfectReward);
         for (var entry : game.infusions.entrySet()) {
             WaveData.Account account = data.account(entry.getKey());
             account.pendingInfusions = Math.min(32, account.pendingInfusions + entry.getValue());
             ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
             if (player != null) {
                 player.sendSystemMessage(Component.literal("마력 주입 " + entry.getValue()
-                        + "회 획득! 무기를 주 손에 들면 무작위 인챈트가 적용됩니다."));
-                applyPendingInfusions(player, data);
+                        + "회 획득! 인챈트할 무기 또는 방어구를 주 손에 들고 J를 누르세요."));
             }
         }
         // A cleared wave begins a fresh team life pool. Spectators return for the next wave.
@@ -721,7 +756,9 @@ public final class EndlessDefense {
         data.waveInProgress = false;
         data.setDirty();
         announce(server, wave + "웨이브 클리어! 기본 +" + reward + " 노드"
-                + (game.bossKilled ? ", 보스 +" + bossReward : "") + " · 체력 회복. 다음 웨이브는 자동 시작됩니다.");
+                + (game.bossKilled ? ", 보스 +" + bossReward : "")
+                + (perfectReward > 0 ? ", 핵심 무피해 +" + perfectReward : "")
+                + " · 체력 회복. 다음 웨이브는 자동 시작됩니다.");
         title(server, wave + "웨이브 클리어!", "체력 회복 · 기본 +" + reward + " 노드", 10, 50, 10);
         cue(server, SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, 0.9f, 1.0f);
         scheduleWave(server, game);
@@ -754,18 +791,18 @@ public final class EndlessDefense {
             player.heal(account.levels[5] * 0.5f);
     }
 
-    private static void applyPendingInfusions(ServerPlayer player, WaveData data) {
+    private static void applyPendingInfusion(ServerPlayer player, WaveData data) {
         WaveData.Account account = data.account(player.getUUID());
-        if (account.pendingInfusions <= 0) return;
-        java.util.List<ItemStack> equipment = new java.util.ArrayList<>();
-        equipment.add(player.getMainHandItem());
-        equipment.add(player.getOffhandItem());
-        for (ItemStack armor : player.getArmorSlots()) equipment.add(armor);
-        equipment.removeIf(stack -> infusionOptions(stack, player.registryAccess()).isEmpty());
-        if (equipment.isEmpty()) return;
-        ItemStack weapon = equipment.get(player.getRandom().nextInt(equipment.size()));
+        if (account.pendingInfusions <= 0) {
+            player.sendSystemMessage(Component.literal("저장된 마력 주입 기회가 없습니다."));
+            return;
+        }
+        ItemStack weapon = player.getMainHandItem();
         var choices = infusionOptions(weapon, player.registryAccess());
-        if (choices.isEmpty()) return;
+        if (choices.isEmpty()) {
+            player.sendSystemMessage(Component.literal("주 손에 인챈트 가능한 무기 또는 방어구를 들어야 합니다. 적용 가능한 인챈트가 모두 최고 단계인 장비는 제외됩니다."));
+            return;
+        }
         var chosen = choices.get(player.getRandom().nextInt(choices.size()));
         int previous = EnchantmentHelper.getEnchantmentsForCrafting(weapon).getLevel(chosen);
         int level = previous > 0 ? previous + 1
@@ -776,6 +813,7 @@ public final class EndlessDefense {
         player.sendSystemMessage(Component.literal(weapon.getHoverName().getString() + "에 " + chosen.value().description().getString()
                 + " " + level + " 인챈트가 적용됐습니다. 남은 마력 주입 " + account.pendingInfusions + "회"));
         player.playNotifySound(SoundEvents.ENCHANTMENT_TABLE_USE, SoundSource.PLAYERS, 0.8f, 1.0f);
+        sync(player.server);
     }
 
     static java.util.List<Holder.Reference<Enchantment>> infusionOptions(ItemStack weapon, RegistryAccess registries) {
@@ -828,8 +866,7 @@ public final class EndlessDefense {
             if (data.started && !data.gameOver && data.teamMembers.add(player.getUUID())) data.setDirty();
             if (data.pendingRespawn.remove(player.getUUID())) data.setDirty();
             applyBenefits(player, data.account(player.getUUID()));
-            applyPendingInfusions(player, data);
-            player.sendSystemMessage(Component.literal("[Endless Defense] G: 최초 준비, H: 진행 상황, K: 상점"));
+            player.sendSystemMessage(Component.literal("[Endless Defense] G: 최초 준비, H: 진행 상황, K: 상점, J: 손에 든 장비 마력 주입"));
             sync(player.server);
         }
     }
@@ -841,6 +878,18 @@ public final class EndlessDefense {
             game.surrenderVotes.remove(player.getUUID());
             trySurrender(player.server, game);
         }
+    }
+
+    @SubscribeEvent public void onWaveTarget(LivingChangeTargetEvent event) {
+        if (!(event.getEntity() instanceof Monster mob) || !(mob.level() instanceof ServerLevel level)
+                || !DefenseMap.selected(level) || level != level.getServer().overworld()) return;
+        Session game = session(level.getServer());
+        if (game.phase != Phase.ACTIVE || !game.mobs.contains(mob.getUUID())) return;
+        int radius = WaveData.get(level.getServer()).number("coreAggroRadius", 12);
+        if (event.getNewTarget() instanceof ServerPlayer player && player.isAlive()
+                && player.gameMode.getGameModeForPlayer() != GameType.SPECTATOR
+                && mob.distanceToSqr(player) <= (double) radius * radius) return;
+        event.setNewTarget(null);
     }
 
     @SubscribeEvent public void onDeath(LivingDeathEvent event) {
@@ -983,12 +1032,14 @@ public final class EndlessDefense {
         if (event.phase != TickEvent.Phase.END) return;
         MinecraftServer server = event.getServer();
         Session game = session(server);
-        if (game.phase == Phase.ACTIVE) TurretSystem.tick(server, WaveData.get(server), game.mobs);
+        if (game.phase == Phase.ACTIVE) {
+            WaveData data = WaveData.get(server);
+            BaseSystem.tickTargets(server, data, game.mobs);
+            TurretSystem.tick(server, data, game.mobs);
+        }
         if (server.getTickCount() % 20 != 0) return;
         DefenseMap.ensure(server);
         BaseSystem.ensureLegacy(server, WaveData.get(server));
-        for (ServerPlayer player : server.getPlayerList().getPlayers())
-            applyPendingInfusions(player, WaveData.get(server));
         if (server.getTickCount() % 200 == 0)
             for (ServerPlayer player : server.getPlayerList().getPlayers())
                 applyBenefits(player, WaveData.get(server).account(player.getUUID()));
