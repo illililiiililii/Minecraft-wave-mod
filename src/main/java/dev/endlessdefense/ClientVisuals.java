@@ -1,6 +1,7 @@
 package dev.endlessdefense;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import com.mojang.logging.LogUtils;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -25,9 +26,11 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.eventbus.api.Event;
 import net.minecraftforge.fml.common.Mod;
 import org.lwjgl.glfw.GLFW;
+import org.slf4j.Logger;
 
 @Mod.EventBusSubscriber(modid = EndlessDefense.MODID, bus = Mod.EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
 public final class ClientVisuals {
+    private static final Logger LOGGER = LogUtils.getLogger();
     private static final KeyMapping READY = new KeyMapping("key.endlessdefense.ready", InputConstants.Type.KEYSYM,
             GLFW.GLFW_KEY_G, "key.categories.endlessdefense");
     private static final KeyMapping PANEL = new KeyMapping("key.endlessdefense.panel", InputConstants.Type.KEYSYM,
@@ -170,9 +173,18 @@ public final class ClientVisuals {
         private final Button[] tabButtons = new Button[TABS.length];
         private Button previousUpgrade, nextUpgrade, previousItem, nextItem;
         private int tab, itemPage, upgradeOffset, visibleCards, cardWidth, left, top;
+        private boolean unavailable;
         private ShopScreen() { super(Component.literal("Endless Defense 상점")); }
 
         @Override protected void init() {
+            try {
+                initShop();
+            } catch (RuntimeException exception) {
+                showUnavailable(exception);
+            }
+        }
+
+        private void initShop() {
             top = Math.max(8, (height - 218) / 2);
             visibleCards = Math.min(4, Math.max(2, (width - 56) / 88));
             cardWidth = Math.min(108, (width - 56) / visibleCards);
@@ -235,11 +247,51 @@ public final class ClientVisuals {
                 case 8 -> new ItemStack(Items.GLISTERING_MELON_SLICE);
                 case 9 -> new ItemStack(Items.SPYGLASS);
                 case 29 -> new ItemStack(Items.WIND_CHARGE);
-                default -> ShopRules.product(id).items()[0];
+                default -> {
+                    ShopRules.Product product = ShopRules.product(id);
+                    yield product == null || product.items().length == 0
+                            ? new ItemStack(Items.BARRIER) : product.items()[0];
+                }
             };
         }
 
         @Override public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+            if (unavailable) {
+                renderUnavailable(graphics);
+                return;
+            }
+            try {
+                renderShop(graphics, mouseX, mouseY, partialTick);
+            } catch (RuntimeException exception) {
+                showUnavailable(exception);
+                renderUnavailable(graphics);
+            }
+        }
+
+        @Override public boolean mouseClicked(double mouseX, double mouseY, int button) {
+            if (unavailable) return true;
+            try {
+                return super.mouseClicked(mouseX, mouseY, button);
+            } catch (RuntimeException exception) {
+                showUnavailable(exception);
+                return true;
+            }
+        }
+
+        private void showUnavailable(RuntimeException exception) {
+            if (unavailable) return;
+            unavailable = true;
+            LOGGER.error("Endless Defense shop screen failed", exception);
+        }
+
+        private void renderUnavailable(GuiGraphics graphics) {
+            graphics.fill(0, 0, width, height, 0xEE101820);
+            graphics.drawCenteredString(font, "상점 정보를 불러올 수 없음", width / 2, height / 2 - 10, 0xFF8888);
+            graphics.drawCenteredString(font, "ESC를 눌러 돌아가세요 · 자세한 오류는 latest.log 확인",
+                    width / 2, height / 2 + 8, 0xFFFFFF);
+        }
+
+        private void renderShop(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
             upgradeOffset = Math.min(upgradeOffset, ((ShopRules.UPGRADE_IDS.length - 1) / visibleCards) * visibleCards);
             itemPage = Math.min(itemPage, (CATALOGS[tab].length - 1) / visibleCards);
             previousUpgrade.active = upgradeOffset > 0;

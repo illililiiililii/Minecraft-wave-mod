@@ -10,7 +10,7 @@ license="MIT"
 
 [[mods]]
 modId="endlessdefense"
-version="0.8.0"
+version="0.8.1"
 displayName="Endless Survival Defense"
 #updateJSONURL="https://example.com/updates.json" #optional
 #displayURL="https://example.com/" #optional

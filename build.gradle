@@ -9,7 +9,7 @@ plugins {
     id 'net.minecraftforge.gradle' version '[7.0.3,8)'
 }
 
-version = '0.8.0'
+version = '0.8.1'
 group = 'dev.endlessdefense'
 base.archivesName = 'endlessdefense'
 

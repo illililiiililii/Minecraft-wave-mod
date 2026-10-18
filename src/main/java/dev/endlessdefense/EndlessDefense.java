@@ -69,7 +69,7 @@ public final class EndlessDefense {
     public static final String MODID = "endlessdefense";
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final SimpleChannel CHANNEL = ChannelBuilder.named(ResourceLocation.fromNamespaceAndPath(MODID, "main"))
-            .networkProtocolVersion(4).simpleChannel();
+            .networkProtocolVersion(5).simpleChannel();
     private static final Map<MinecraftServer, Session> SESSIONS = new WeakHashMap<>();
 
     public EndlessDefense(FMLJavaModLoadingContext context) {
@@ -108,8 +108,7 @@ public final class EndlessDefense {
                         buffer.readBoolean(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(), buffer.readUtf(2048),
                         buffer.readBoolean(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(),
                         buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarLong(),
-                        new int[] {buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(),
-                                buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt()},
+                        readUpgrades(buffer),
                         readStock(buffer), buffer.readVarInt(), buffer.readBoolean(), buffer.readVarInt(), buffer.readBoolean()))
                 .consumerMainThread(StatusPacket::handle).add();
         CHANNEL.messageBuilder(ConfigPacket.class, 2)
@@ -208,9 +207,20 @@ public final class EndlessDefense {
                                int remaining, String roster, boolean canConfigure, int baseMobs, int healthPercent,
                                int damagePercent, int awareness, int armorBonus, int gearChance, long coins, int[] upgrades,
                                int[] stock, int respawns, boolean night, int surrenderVotes, boolean selfSurrender) {
+        public StatusPacket {
+            upgrades = java.util.Arrays.copyOf(upgrades, ShopRules.UPGRADE_IDS.length);
+            stock = java.util.Arrays.copyOf(stock, ShopRules.NAMES.length);
+        }
+
         private static void handle(StatusPacket message, CustomPayloadEvent.Context context) {
             if (context.isClientSide()) ClientVisuals.accept(message);
         }
+    }
+
+    private static int[] readUpgrades(net.minecraft.network.FriendlyByteBuf buffer) {
+        int[] upgrades = new int[ShopRules.UPGRADE_IDS.length];
+        for (int i = 0; i < upgrades.length; i++) upgrades[i] = buffer.readVarInt();
+        return upgrades;
     }
 
     private static int[] readStock(net.minecraft.network.FriendlyByteBuf buffer) {
